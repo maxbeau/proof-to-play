@@ -6,7 +6,7 @@ const all=[...M.insights,M.broken_claim];
 const clock=s=>Math.floor(s/60).toString().padStart(2,'0')+':'+(s%60).toString().padStart(2,'0');
 function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 function button(text,fn){const b=node('button',text);b.onclick=fn;return b;}
-function stop(){clearInterval(timer);timer=null;$('play').textContent='Play';}
+function stop(){clearInterval(timer);timer=null;$('play').textContent='Play';$('play').setAttribute('aria-pressed','false');}
 function pitchUpdate(){
  if(!window.PitchView)return;
  const current=M.events.find(e=>e.time===cursor),active=M.insights.find(c=>c.window_start<=cursor&&cursor<=c.window_end)||null;
@@ -14,34 +14,42 @@ function pitchUpdate(){
 }
 function view(name){document.querySelectorAll('main>section').forEach(s=>s.hidden=s.id!==name);document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===name)));if(name==='pitch'){pitchUpdate();window.PitchView?.resize();}}
 window.setMatchCursor=seconds=>{stop();cursor=Math.max(5,Math.min(5400,Math.round(Number(seconds)/5)*5));paint();};
-window.pitchModuleFailed=()=>{const message=$('pitch-fallback');if(message){message.hidden=false;message.textContent='Pitch view needs a local server or the GitHub Pages link; use python3 -m http.server 8000';}};
+window.pitchModuleFailed=()=>{const message=$('pitch-fallback');if(message){message.hidden=false;message.textContent='Pitch view needs a local server or the GitHub Pages link; use python3 -m http.server 8000';$('pitch-canvas').hidden=true;}};
 window.pitchViewReady=api=>{window.PitchView=api;pitchUpdate();};
 function card(c,publishing=false,air=false){
  const out=E.render(c,M.events,M.teams,air?'Broadcast':$('density').value,$('language').value,cursor),valid=out.status==='Verified';
- const box=node('article',undefined,'card');box.append(node('small',M.label),node('p',out.status+(publishing?' · '+queue[c.id]:''),valid?'badge':'badge held'));
+ const box=node('article',undefined,'card'+(!valid?' card-held':'')+(publishing?' card-'+queue[c.id].toLowerCase():''));box.append(node('small',M.label),node('p',out.status+(publishing?' · '+queue[c.id]:''),valid?'badge':'badge held'));
  const cap=node('div',undefined,'caption');cap.lang=$('language').value;
  cap.append(node('small',cap.lang==='zh'?'发生了什么':'What happened'),node('p',out.what),node('small',cap.lang==='zh'?'为什么重要':'Why it matters'),node('p',out.why));box.append(cap);
  if(valid){
-  box.append(node('p','Evidence · '+clock(c.window_start)+'–'+clock(c.window_end)+' · '+c.formula_version));
-  const drawer=node('details'),summary=node('summary','Evidence drawer · event IDs, formula and source rows');drawer.append(summary,node('pre',JSON.stringify(c,null,2)));
+  box.append(node('p','Evidence · '+clock(c.window_start)+'–'+clock(c.window_end)+' · '+c.formula_version,'evidence-meta'));
+  const drawer=node('details'),summary=node('summary','Evidence drawer · event IDs, formula and source rows');
+  const facts=node('dl',undefined,'evidence-facts');
+  [['Window',clock(c.window_start)+'–'+clock(c.window_end)],['Formula version',c.formula_version],['Source rows',String(c.event_ids.length)],['Event IDs',c.event_ids[0]+' … '+c.event_ids.at(-1)]].forEach(([label,value])=>{const item=node('div');item.append(node('dt',label),node('dd',value));facts.append(item);});
+  drawer.append(summary,facts,node('pre',JSON.stringify(c,null,2)));
   const raw=node('details');raw.append(node('summary','Source events in this window'),node('pre',JSON.stringify(M.events.filter(e=>c.event_ids.includes(e.id)),null,2)));drawer.append(raw);box.append(drawer);
  }else box.append(node('p',out.evidence));
  if(publishing){
   const controls=node('div',undefined,'controls');
-  for(const action of ['Approved','Rejected']){const b=button(action==='Approved'?'Approve':'Reject',()=>{E.decide(queue,c,action,M.events,M.teams,cursor);paint();});b.disabled=queue[c.id]!=='Draft'||(action==='Approved'&&!valid);controls.append(b);}box.append(controls);
+  for(const action of ['Approved','Rejected']){const b=button(action==='Approved'?'Approve':'Reject',()=>{E.decide(queue,c,action,M.events,M.teams,cursor);paint();});b.className=action==='Approved'?'button-primary':'button-reject';b.disabled=queue[c.id]!=='Draft'||(action==='Approved'&&!valid);controls.append(b);}box.append(controls);
  }else if(valid&&!air)box.append(button('Open producer queue',()=>view('publish')));
  return box;
 }
 function fill(id,claims,publication=false,air=false){$(id).replaceChildren();if(!claims.length)$(id).append(node('p',air?'No approved captions at this cursor.':'No verified moments yet. Use a turning-point jump or play the timeline.'));claims.forEach(c=>$(id).append(card(c,publication,air)));}
 function paint(){
  $('timeline').value=cursor;if($('pitch-timeline'))$('pitch-timeline').value=cursor;$('clock').textContent=clock(cursor)+' / 90:00';
+ $('pitch-clock').textContent=clock(cursor)+' / 90:00 · Sample '+Math.floor(cursor/5);
+ $('timeline').setAttribute('aria-valuetext',clock(cursor)+' of 90:00');$('pitch-timeline').setAttribute('aria-valuetext',clock(cursor)+' of 90:00');
  const current=M.events.find(e=>e.time===cursor),start=Math.max(0,cursor-600),m=E.metrics(M.events,start,cursor,M.teams);
- $('score').textContent=M.teams.map(t=>t+' '+current.state.score[t]).join(' · ');
+ $('score').replaceChildren();M.teams.forEach(t=>{const team=node('span',undefined,'score-team');team.append(node('span',t),node('span',String(current.state.score[t]),'score-number'));$('score').append(team);});
  $('state').textContent=JSON.stringify(current,null,2);
  $('metrics').replaceChildren();
  const values=[...M.teams.map(t=>[t+' possession proxy',m.possession_pct[t]+'%']),['Pressing proxy',m.pressing_proxy+' /min'],['Passing tempo',m.tempo+' /min']];
- values.forEach(([label,value])=>{const n=node('div',undefined,'metric');n.append(node('strong',value),node('span',label));$('metrics').append(n);});
- $('players').textContent='Key players by completed passes · '+(m.key_players.map(p=>p.player+': '+p.completed_passes).join(' · ')||'No completed passes yet')+' · Window '+clock(start)+'–'+clock(cursor);
+ values.forEach(([label,value])=>{const n=node('div',undefined,'metric'),parts=value.split(' '),number=node('strong',parts[0]);if(parts.length>1)number.append(node('small',parts.slice(1).join(' ')));n.append(number,node('span',label));$('metrics').append(n);});
+ $('players').replaceChildren(node('p','Key players by completed passes','eyebrow'));
+ m.key_players.forEach(p=>{const row=node('div',undefined,'player-row');row.append(node('span',p.player),node('strong',String(p.completed_passes)));$('players').append(row);});
+ if(!m.key_players.length)$('players').append(node('span','No completed passes yet'));
+ $('players').append(node('small','Window '+clock(start)+'–'+clock(cursor)));
  const visible=M.insights.filter(c=>c.window_end<=cursor);
  fill('live-cards',visible);fill('evidence-cards',[...visible,M.broken_claim]);fill('queue',[...visible,M.broken_claim],true);
  fill('broadcast',E.broadcast(all,queue,M.events,M.teams,cursor),false,true);
@@ -50,15 +58,15 @@ function paint(){
 function scenario(){
  $('press-value').textContent=$('press').value+'%';$('flank-value').textContent=$('flank').value+' percentage points';if(!frozen)return;
  const result=E.scenario(frozen,Number($('press').value),Number($('flank').value));
- const table=node('table'),head=node('tr');['Next ten minutes','Baseline continuation','Directional scenario'].forEach(t=>head.append(node('th',t)));table.append(head);
+ const table=node('table'),head=node('tr');['Next ten minutes','Baseline continuation','Directional scenario'].forEach(t=>{const th=node('th',t);th.setAttribute('scope','col');head.append(th);});table.append(head);
  [['pressure_actions','Pressure actions (index count)'],['flank_share_pct','Flank pass share (%)'],['recovery_seconds','Recovery (seconds)']].forEach(([key,label])=>{const row=node('tr');[label,result.baseline[key],result.scenario[key]].forEach(t=>row.append(node('td',t)));table.append(row);});
  const details=node('details');details.append(node('summary','Frozen snapshot, source IDs and scenario formulas'),node('pre',JSON.stringify({snapshot:frozen,result},null,2)));
- $('comparison').replaceChildren(node('h3',result.label),table,node('p',result.assumptions),details);
+ $('comparison').replaceChildren(node('h3',result.label),table,node('p',result.assumptions,'assumptions'),details);
 }
 all.forEach(c=>queue[c.id]='Draft');
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>view(b.dataset.view));
 $('pitch-timeline').oninput=()=>window.setMatchCursor(Number($('pitch-timeline').value));
-$('play').onclick=()=>{if(timer){stop();return;}if(cursor>=5400)cursor=5;$('play').textContent='Pause';timer=setInterval(()=>{cursor=Math.min(5400,cursor+5);paint();if(cursor===5400)stop();},250);};
+$('play').onclick=()=>{if(timer){stop();return;}if(cursor>=5400)cursor=5;$('play').textContent='Pause';$('play').setAttribute('aria-pressed','true');timer=setInterval(()=>{cursor=Math.min(5400,cursor+5);paint();if(cursor===5400)stop();},250);};
 $('step').onclick=()=>{stop();cursor=Math.min(5400,cursor+5);paint();};
 $('timeline').oninput=()=>{stop();cursor=Number($('timeline').value);paint();};
 M.insights.forEach(c=>$('jumps').append(button(c.kind+' · '+clock(c.window_end),()=>{stop();cursor=c.window_end;paint();})));

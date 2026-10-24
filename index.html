@@ -1,19 +1,107 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Synthetic match evidence, directional scenarios and producer-approved captions. Offline demo."><title>Evidence-to-Action Match Room · Synthetic / Simulated Match</title><link rel="stylesheet" href="style.css"><script type="importmap">{"imports":{"three":"./vendor/three.module.js","OrbitControls":"./vendor/OrbitControls.js"}}</script></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Synthetic match evidence, directional scenarios and producer-approved captions. Offline demo.">
+<title>Evidence-to-Action Match Room · Synthetic / Simulated Match</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js","OrbitControls":"./vendor/OrbitControls.js"}}</script>
+</head>
 <body>
-<header><div><p class="eyebrow">LOCAL DEMO / NO EXTERNAL SERVICES</p><h1>Evidence-to-Action<br>Match Room</h1><p>From an event, to evidence, to an approved caption.</p></div><div class="notice">Synthetic / Simulated Match<br><small>Fictional teams and players · Not a prediction</small></div></header>
+<header class="studio-header">
+  <div class="brand">
+    <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> PROOF-TO-PLAY <span class="eyebrow-divider">/</span> LOCAL DEMO / NO EXTERNAL SERVICES</p>
+    <h1>Evidence-to-Action<br><span>Match Room</span></h1>
+    <p class="tagline">From an event, to evidence, to an approved caption.</p>
+  </div>
+  <div class="header-status">
+    <div class="notice"><strong>Synthetic / Simulated Match</strong><small>Fictional teams and players · Not a prediction</small></div>
+    <div class="session-meta"><span>CONTROL ROOM <strong>01</strong></span><span>REPLAY <strong>90:00</strong></span><span>SEED <strong>20261024</strong></span></div>
+  </div>
+</header>
 <main>
-<div class="toolbar"><label>Audience <select id="density"><option>Fan</option><option>Analyst</option><option>Broadcast</option></select></label><label>Caption language <select id="language"><option value="en">English</option><option value="zh">中文</option></select></label><span>Broadcast density previews still require approval.</span></div>
-<nav aria-label="Match room views"><button data-view="live" aria-pressed="true">Live</button><button data-view="evidence" aria-pressed="false">Evidence</button><button data-view="scenario" aria-pressed="false">Scenario</button><button data-view="publish" aria-pressed="false">Publish</button><button data-view="pitch" aria-pressed="false">Pitch</button></nav>
-<section id="live" aria-labelledby="live-title"><h2 id="live-title">Live <small>Synthetic / Simulated Match</small></h2><div class="panel"><div class="controls"><button id="play">Play</button><button id="step">Next event</button><label for="timeline">Replay position</label><output id="clock"></output></div><input id="timeline" type="range" min="5" max="5400" step="5" value="5" aria-label="Replay time in seconds"><div id="jumps" class="controls"></div><p class="muted">Replay speed: one event every 250 ms. All metrics use the trailing ten minutes available at the cursor.</p><h3 id="score"></h3><div id="metrics" class="metrics"></div><p id="players"></p><details><summary>Current event and state snapshot</summary><pre id="state"></pre></details></div><h3>Verified moments available at this cursor</h3><div id="live-cards" class="cards"></div></section>
-<section id="evidence" hidden aria-labelledby="evidence-title"><h2 id="evidence-title">Evidence <small>Synthetic / Simulated Match</small></h2><p>Each card is checked again against its source window. Expand the drawer to inspect the exact events.</p><div id="evidence-cards" class="cards"></div></section>
-<section id="scenario" hidden aria-labelledby="scenario-title"><h2 id="scenario-title">Scenario <small>Synthetic / Simulated Match</small></h2><p class="notice">Directional scenario on synthetic events. Not a prediction.</p><button id="freeze">Freeze current replay snapshot</button><p id="freeze-status" role="status">Replay at least ten minutes, then freeze a snapshot.</p><div class="panel"><label for="press">Pressing intensity change: <output id="press-value">0%</output></label><input id="press" type="range" min="-20" max="20" step="5" value="0"><label for="flank">Flank bias change: <output id="flank-value">0 percentage points</output></label><input id="flank" type="range" min="-20" max="20" step="5" value="0"><div id="comparison">Freeze a snapshot to compare.</div></div></section>
-<section id="publish" hidden aria-labelledby="publish-title"><h2 id="publish-title">Publish <small>Synthetic / Simulated Match</small></h2><p>Local producer queue: Draft → Approved or Rejected. Reload resets decisions. Only Approved, verified items reach Broadcast.</p><button id="reset">Reset local decisions</button><div id="queue" class="cards"></div><h3>Broadcast · Approved captions only</h3><div id="broadcast" class="cards" aria-live="polite"></div></section>
-<section id="pitch" hidden aria-labelledby="pitch-title"><h2 id="pitch-title">Pitch <small>Synthetic / Simulated Match</small></h2><p class="muted">Synthetic positions — schematic, not tracked data.</p><div class="panel"><div class="controls"><button id="pitch-reset">Reset view</button><label for="pitch-timeline">Shared replay cursor</label><output id="pitch-clock">00:05 / 90:00 · Sample 1</output></div><input id="pitch-timeline" type="range" min="5" max="5400" step="5" value="5" aria-label="Shared pitch replay time in seconds"><p id="pitch-evidence" class="muted">No active evidence window.</p><div id="pitch-fallback" class="pitch-fallback" role="status" hidden></div><canvas id="pitch-canvas" aria-label="Three dimensional synthetic pitch and schematic player positions"></canvas><div class="pitch-legend"><span><i class="legend-dot quills"></i>Aster Quills</span><span><i class="legend-dot lanterns"></i>Mica Lanterns</span><span><i class="legend-dot ball-dot"></i>Ball</span></div><p class="muted">Drag to rotate · scroll to zoom · right-drag to pan. Highlight coordinates are derived from the active evidence window's source events.</p></div></section>
-<p id="feedback" role="status"></p>
-</main><footer>Synthetic / Simulated Match · Offline deterministic templates · Seed 20261024 · No real match data</footer>
+  <div class="toolbar">
+    <div class="toolbar-heading"><span class="eyebrow">CAPTION SETTINGS</span><span>One source. Three perspectives.</span></div>
+    <label>Audience <select id="density"><option>Fan</option><option>Analyst</option><option>Broadcast</option></select></label>
+    <label>Caption language <select id="language"><option value="en">English</option><option value="zh">中文</option></select></label>
+    <p class="toolbar-note">Broadcast density previews still require approval.</p>
+  </div>
+  <nav class="view-nav" aria-label="Match room views">
+    <button data-view="live" aria-pressed="true" aria-controls="live"><span class="tab-index" aria-hidden="true">01</span>Live</button>
+    <button data-view="evidence" aria-pressed="false" aria-controls="evidence"><span class="tab-index" aria-hidden="true">02</span>Evidence</button>
+    <button data-view="scenario" aria-pressed="false" aria-controls="scenario"><span class="tab-index" aria-hidden="true">03</span>Scenario</button>
+    <button data-view="publish" aria-pressed="false" aria-controls="publish"><span class="tab-index" aria-hidden="true">04</span>Publish</button>
+    <button data-view="pitch" aria-pressed="false" aria-controls="pitch"><span class="tab-index" aria-hidden="true">05</span>Pitch</button>
+  </nav>
+  <section id="live" class="workspace live-workspace" aria-labelledby="live-title">
+    <div class="workspace-heading"><div><p class="eyebrow">01 / MATCH MONITOR</p><h2 id="live-title">Live <small>Synthetic / Simulated Match</small></h2></div><p>Follow the event.<br>Find the evidence.</p></div>
+    <div class="live-desk">
+      <div class="score-panel panel">
+        <div class="panel-heading"><span class="eyebrow">MATCH STATE</span><span class="micro-badge">SIMULATED</span></div>
+        <h3 id="score" class="scorebug"></h3>
+        <div class="score-note"><span class="status-dot" aria-hidden="true"></span> Deterministic replay · fictional match</div>
+        <details class="state-drawer"><summary>Current event and state snapshot</summary><pre id="state"></pre></details>
+      </div>
+      <div class="replay-panel panel">
+        <div class="panel-heading"><label class="eyebrow" for="timeline">Replay position</label><output id="clock" class="clock"></output></div>
+        <input id="timeline" type="range" min="5" max="5400" step="5" value="5" aria-label="Replay time in seconds">
+        <div class="range-scale" aria-hidden="true"><span>00:00</span><span>45:00</span><span>90:00</span></div>
+        <div class="controls transport"><button id="play" class="button-primary">Play</button><button id="step">Next event</button></div>
+        <div class="jump-heading"><span class="eyebrow">TURNING-POINT JUMPS</span><span>Go straight to the evidence</span></div>
+        <div id="jumps" class="controls jump-controls"></div>
+        <p class="muted replay-note">Replay speed: one event every 250 ms. All metrics use the trailing ten minutes available at the cursor.</p>
+      </div>
+    </div>
+    <div class="section-heading"><h3>Window intelligence</h3><span class="muted">Event-derived proxies / trailing window</span></div>
+    <div class="intelligence-grid"><div id="metrics" class="metrics"></div><div id="players" class="metric players-tile"></div></div>
+    <div class="section-heading"><h3>Verified moments available at this cursor</h3><span class="micro-badge">EVIDENCE GATED</span></div>
+    <div id="live-cards" class="cards"></div>
+  </section>
+  <section id="evidence" class="workspace evidence-workspace" hidden aria-labelledby="evidence-title">
+    <div class="workspace-heading"><div><p class="eyebrow">02 / VERIFICATION DESK</p><h2 id="evidence-title">Evidence <small>Synthetic / Simulated Match</small></h2></div><p>Every claim has a source.<br>Every source can be inspected.</p></div>
+    <div class="workspace-brief"><span class="brief-number" aria-hidden="true">↳</span><div><h3>Inspect before you interpret</h3><p>Each card is checked again against its source window. Expand the drawer to inspect the exact events.</p></div><span class="micro-badge warning-badge">INVALID CLAIMS HELD</span></div>
+    <div id="evidence-cards" class="cards evidence-grid"></div>
+  </section>
+  <section id="scenario" class="workspace scenario-workspace" hidden aria-labelledby="scenario-title">
+    <div class="workspace-heading"><div><p class="eyebrow">03 / WHAT-IF DESK</p><h2 id="scenario-title">Scenario <small>Synthetic / Simulated Match</small></h2></div><p>Freeze the evidence.<br>Explore a directional change.</p></div>
+    <p class="notice scenario-notice">Directional scenario on synthetic events. Not a prediction.</p>
+    <div class="scenario-layout">
+      <div class="scenario-controls panel">
+        <p class="eyebrow">01 / LOCK THE BASELINE</p><h3>Freeze snapshot</h3>
+        <button id="freeze" class="button-primary">Freeze current replay snapshot</button>
+        <p id="freeze-status" class="snapshot-status" role="status">Replay at least ten minutes, then freeze a snapshot.</p>
+        <div class="knob"><p class="eyebrow">02 / ADJUST THE INPUTS</p><label for="press">Pressing intensity change: <output id="press-value">0%</output></label><input id="press" type="range" min="-20" max="20" step="5" value="0"><div class="range-scale" aria-hidden="true"><span>−20%</span><span>Baseline</span><span>+20%</span></div></div>
+        <div class="knob"><label for="flank">Flank bias change: <output id="flank-value">0 percentage points</output></label><input id="flank" type="range" min="-20" max="20" step="5" value="0"><div class="range-scale" aria-hidden="true"><span>−20 pp</span><span>Baseline</span><span>+20 pp</span></div></div>
+        <p class="muted">The frozen baseline stays fixed when you move the replay cursor. Zero adjustments reproduce that baseline.</p>
+      </div>
+      <div class="comparison-panel panel"><p class="eyebrow">03 / COMPARE THE DIRECTION</p><h3>Baseline vs. directional</h3><div id="comparison" class="comparison">Freeze a snapshot to compare.</div><div class="assumption-note"><span class="eyebrow">MODEL BOUNDARY</span><p>Independent controls. No opponent adaptation. No score or win-probability prediction. Scenario output cannot enter the caption queue.</p></div></div>
+    </div>
+  </section>
+  <section id="publish" class="workspace publish-workspace" hidden aria-labelledby="publish-title">
+    <div class="workspace-heading"><div><p class="eyebrow">04 / PRODUCER DESK</p><h2 id="publish-title">Publish <small>Synthetic / Simulated Match</small></h2></div><p>A human decision.<br>Before every caption.</p></div>
+    <div class="workspace-brief"><div><h3>Review. Decide. Broadcast.</h3><p>Local producer queue: Draft → Approved or Rejected. Reload resets decisions. Only Approved, verified items reach Broadcast.</p></div><button id="reset" class="button-quiet">Reset local decisions</button></div>
+    <div class="section-heading"><h3>Approval board</h3><span class="muted">Draft → Approved / Rejected</span></div>
+    <div id="queue" class="cards approval-board"></div>
+    <div class="broadcast-stage"><div class="section-heading"><div><p class="eyebrow">PROGRAM OUTPUT / LOCAL PREVIEW</p><h3>Broadcast · Approved captions only</h3></div><span class="micro-badge">APPROVAL REQUIRED</span></div><div id="broadcast" class="cards" aria-live="polite"></div></div>
+  </section>
+  <section id="pitch" class="workspace pitch-workspace" hidden aria-labelledby="pitch-title">
+    <div class="workspace-heading"><div><p class="eyebrow">05 / SPATIAL MONITOR</p><h2 id="pitch-title">Pitch <small>Synthetic / Simulated Match</small></h2></div><p>One match.<br>The same shared cursor.</p></div>
+    <div class="pitch-stage panel">
+      <div class="pitch-stage-heading"><div><p class="eyebrow">SCHEMATIC FIELD VIEW</p><p class="muted">Synthetic positions — schematic, not tracked data.</p></div><button id="pitch-reset">Reset view</button></div>
+      <div class="pitch-legend"><span><i class="legend-dot quills" aria-hidden="true"></i>Aster Quills</span><span><i class="legend-dot lanterns" aria-hidden="true"></i>Mica Lanterns</span><span><i class="legend-dot ball-dot" aria-hidden="true"></i>Ball</span></div>
+      <div id="pitch-fallback" class="pitch-fallback" role="status" hidden></div>
+      <canvas id="pitch-canvas" aria-label="Three dimensional synthetic pitch and schematic player positions"></canvas>
+      <div class="pitch-transport"><div class="panel-heading"><label class="eyebrow" for="pitch-timeline">Shared replay cursor</label><output id="pitch-clock" class="clock">00:05 / 90:00 · Sample 1</output></div><input id="pitch-timeline" type="range" min="5" max="5400" step="5" value="5" aria-label="Shared pitch replay time in seconds"><div class="range-scale" aria-hidden="true"><span>00:00</span><span>45:00</span><span>90:00</span></div></div>
+      <p id="pitch-evidence" class="evidence-strip muted">No active evidence window.</p>
+      <p class="muted pitch-help">Drag to rotate · scroll to zoom · right-drag to pan. Highlight coordinates are derived from the active evidence window's source events.</p>
+    </div>
+  </section>
+  <p id="feedback" role="status"></p>
+</main>
+<footer><div><strong>Synthetic / Simulated Match · Not a prediction</strong><span>Offline deterministic templates · Seed 20261024 · No real match data</span></div><p>Local HTML / CSS / JavaScript + vendored Three.js · Python-generated events<br>Azure / Microsoft Foundry: optional / not used · No LLM or cloud services</p></footer>
 <noscript>This local demo requires JavaScript to replay the synthetic events.</noscript>
 <script src="data/match.js"></script><script src="engine.js"></script><script src="app.js"></script>
 <script type="module" src="pitch.js" onerror="window.pitchModuleFailed?.()"></script>
-</body></html>
+</body>
+</html>

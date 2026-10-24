@@ -33,6 +33,14 @@ Generation requires Python 3.10+ and its standard library only. The tests additi
 5. Switch Fan / Analyst / Broadcast density and English / 中文. Broadcast density previews in other views do not constitute approval. Only the Publish view's Broadcast output contains approved captions.
 6. **Pitch:** At the same five-second cursor as Live, inspect the schematic positions of both fictional teams and the ball. Play, step, jump and either replay slider all move the shared cursor. Drag to rotate, scroll to zoom, right-drag to pan, or press Reset view. When a verified evidence window is active, its flank passing zone or pressing-event locations are highlighted from that claim's source events.
 
+## Studio interface
+
+The five views share a dark broadcast-control-room design: deep navy surfaces, mint replay and verification accents, amber review notices, violet scenario controls, and high-contrast caption output. Local CSS tokens define the system-font typography, spacing, radii, borders and shadows. Clocks, scores and metrics use tabular numbers. The view navigation stays visible while scrolling, with visible keyboard focus and reduced-motion support.
+
+Live pairs a broadcast-style score panel with a replay console, turning-point buttons, metric tiles and ranked fictional player IDs. Evidence drawers lead with window, formula version, source-row count and event-ID bounds, followed by the complete original evidence and source rows. Invalid claims remain visibly held. Scenario places the frozen snapshot and labelled controls beside the comparison table, with assumptions visible. Publish uses a decision board and a separate approved-caption output stage. Pitch has a responsive canvas stage, team legend and shared replay controls; its module-load fallback remains available.
+
+On phones the main workspaces stack into one column, metric tiles use a compact grid, and controls retain generous touch targets. The redesign changes presentation only: deterministic calculations, evidence validation, approval rules, synthetic geometry and shared-cursor behavior remain the same. No dependencies, assets or services were added.
+
 ## Five-stage architecture
 
 | Stage | Local implementation | Responsibility |

@@ -160,8 +160,9 @@ function resetView() {
 
 function resize() {
   if (!renderer || !canvas) return;
-  const width = Math.max(320, canvas.clientWidth || canvas.parentElement.clientWidth || 900);
-  const height = Math.max(360, Math.min(650, width * .58));
+  // Match the CSS stage dimensions, including narrow phone layouts.
+  const width = Math.max(1, canvas.clientWidth || canvas.parentElement.clientWidth || 900);
+  const height = Math.max(1, canvas.clientHeight || 360);
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
