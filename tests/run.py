@@ -9,4 +9,4 @@ if not shutil.which('node'):
 for command in [[sys.executable,'-m','unittest','discover','-s','tests','-v'],['node','tests/browser.test.js']]:
     result=subprocess.run(command,cwd=root)
     if result.returncode:sys.exit(result.returncode)
-print('Acceptance suite: 19 passed, 0 failed.')
+print('Acceptance suite: 23 passed, 0 failed.')

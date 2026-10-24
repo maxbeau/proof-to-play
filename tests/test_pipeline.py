@@ -1,5 +1,7 @@
 import copy
+import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -17,6 +19,29 @@ class Acceptance(unittest.TestCase):
 
     def test_seed_byte_identical(self):
         self.assertEqual(p.serialized(p.build()), p.serialized(p.build()))
+
+    def test_positions_bounds_and_player_speed_cap(self):
+        for event in self.events:
+            self.assertEqual(len(event['positions']), 46)
+            coords = [event['positions'][0:2]] + [event['positions'][2+i*2:4+i*2] for i in range(22)]
+            for x, y in coords:
+                self.assertTrue(-52.5 <= x <= 52.5)
+                self.assertTrue(-34 <= y <= 34)
+        for previous, current in zip(self.events, self.events[1:]):
+            for player in range(22):
+                i = 2 + player*2
+                distance = math.hypot(current['positions'][i]-previous['positions'][i], current['positions'][i+1]-previous['positions'][i+1])
+                self.assertLessEqual(distance, 50, f'{current["id"]}, player {player}: {distance}m/5s')
+
+    def test_positions_change_with_seed_and_default_regeneration_is_identical(self):
+        alternate = p.build(p.SEED+1)
+        self.assertNotEqual([e['positions'] for e in self.events], [e['positions'] for e in alternate['events']])
+        files = ['match.json', 'match.js', 'events.jsonl']
+        expected = {name: (ROOT/'data'/name).read_bytes() for name in files}
+        subprocess.run([sys.executable, str(ROOT/'pipeline.py')], cwd=ROOT, check=True, capture_output=True, text=True)
+        for name in files:
+            actual = (ROOT/'data'/name).read_bytes()
+            self.assertEqual(hashlib.sha256(actual).digest(), hashlib.sha256(expected[name]).digest(), name)
 
     def test_seed_changes_events(self):
         self.assertNotEqual(p.generate(), p.generate(p.SEED+1))
@@ -108,5 +133,14 @@ class Acceptance(unittest.TestCase):
             self.assertNotIn('fetch(',source)
             self.assertNotIn('XMLHttpRequest',source)
             self.assertNotIn('innerHTML',source)
+
+    def test_pitch_modules_and_import_map_are_local(self):
+        html = (ROOT/'index.html').read_text()
+        self.assertTrue((ROOT/'pitch.js').is_file())
+        self.assertTrue((ROOT/'vendor/three.module.js').is_file())
+        self.assertTrue((ROOT/'vendor/OrbitControls.js').is_file())
+        self.assertIn('"three":"./vendor/three.module.js"', html)
+        self.assertIn('"OrbitControls":"./vendor/OrbitControls.js"', html)
+        self.assertNotIn('://', html)
 
 if __name__=='__main__':unittest.main()

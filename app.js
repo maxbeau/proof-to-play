@@ -7,7 +7,15 @@ const clock=s=>Math.floor(s/60).toString().padStart(2,'0')+':'+(s%60).toString()
 function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 function button(text,fn){const b=node('button',text);b.onclick=fn;return b;}
 function stop(){clearInterval(timer);timer=null;$('play').textContent='Play';}
-function view(name){document.querySelectorAll('main>section').forEach(s=>s.hidden=s.id!==name);document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===name)));}
+function pitchUpdate(){
+ if(!window.PitchView)return;
+ const current=M.events.find(e=>e.time===cursor),active=M.insights.find(c=>c.window_start<=cursor&&cursor<=c.window_end)||null;
+ window.PitchView.update(cursor,current,active,M.events);
+}
+function view(name){document.querySelectorAll('main>section').forEach(s=>s.hidden=s.id!==name);document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===name)));if(name==='pitch'){pitchUpdate();window.PitchView?.resize();}}
+window.setMatchCursor=seconds=>{stop();cursor=Math.max(5,Math.min(5400,Math.round(Number(seconds)/5)*5));paint();};
+window.pitchModuleFailed=()=>{const message=$('pitch-fallback');if(message){message.hidden=false;message.textContent='Pitch view needs a local server or the GitHub Pages link; use python3 -m http.server 8000';}};
+window.pitchViewReady=api=>{window.PitchView=api;pitchUpdate();};
 function card(c,publishing=false,air=false){
  const out=E.render(c,M.events,M.teams,air?'Broadcast':$('density').value,$('language').value,cursor),valid=out.status==='Verified';
  const box=node('article',undefined,'card');box.append(node('small',M.label),node('p',out.status+(publishing?' · '+queue[c.id]:''),valid?'badge':'badge held'));
@@ -26,7 +34,7 @@ function card(c,publishing=false,air=false){
 }
 function fill(id,claims,publication=false,air=false){$(id).replaceChildren();if(!claims.length)$(id).append(node('p',air?'No approved captions at this cursor.':'No verified moments yet. Use a turning-point jump or play the timeline.'));claims.forEach(c=>$(id).append(card(c,publication,air)));}
 function paint(){
- $('timeline').value=cursor;$('clock').textContent=clock(cursor)+' / 90:00';
+ $('timeline').value=cursor;if($('pitch-timeline'))$('pitch-timeline').value=cursor;$('clock').textContent=clock(cursor)+' / 90:00';
  const current=M.events.find(e=>e.time===cursor),start=Math.max(0,cursor-600),m=E.metrics(M.events,start,cursor,M.teams);
  $('score').textContent=M.teams.map(t=>t+' '+current.state.score[t]).join(' · ');
  $('state').textContent=JSON.stringify(current,null,2);
@@ -37,6 +45,7 @@ function paint(){
  const visible=M.insights.filter(c=>c.window_end<=cursor);
  fill('live-cards',visible);fill('evidence-cards',[...visible,M.broken_claim]);fill('queue',[...visible,M.broken_claim],true);
  fill('broadcast',E.broadcast(all,queue,M.events,M.teams,cursor),false,true);
+ pitchUpdate();
 }
 function scenario(){
  $('press-value').textContent=$('press').value+'%';$('flank-value').textContent=$('flank').value+' percentage points';if(!frozen)return;
@@ -48,6 +57,7 @@ function scenario(){
 }
 all.forEach(c=>queue[c.id]='Draft');
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>view(b.dataset.view));
+$('pitch-timeline').oninput=()=>window.setMatchCursor(Number($('pitch-timeline').value));
 $('play').onclick=()=>{if(timer){stop();return;}if(cursor>=5400)cursor=5;$('play').textContent='Pause';timer=setInterval(()=>{cursor=Math.min(5400,cursor+5);paint();if(cursor===5400)stop();},250);};
 $('step').onclick=()=>{stop();cursor=Math.min(5400,cursor+5);paint();};
 $('timeline').oninput=()=>{stop();cursor=Number($('timeline').value);paint();};

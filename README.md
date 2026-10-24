@@ -6,13 +6,13 @@ Turn synthetic match events into reproducible insights, auditable directional sc
 
 ## Demo quickstart
 
-Open **index.html** directly in a modern browser. All assets and generated data are included; no build, npm, server, account or network connection is required. Local classic scripts load the bundle even under file URLs.
+Open **index.html** directly in a modern browser to use Live, Evidence, Scenario and Publish. Their classic scripts and generated data work under `file://`. The Pitch view uses local ES modules, which some browsers block under `file://`; use the local HTTP server or the GitHub Pages URL for Pitch.
 
 Alternatively, from this directory:
 
     python3 -m http.server 8000 --bind 127.0.0.1
 
-Open localhost on port 8000. Stop the server with Ctrl+C. This serves only local files. Relative asset paths make this directory suitable for later static hosting, including GitHub Pages. Nothing has been deployed, pushed or submitted.
+Open `http://127.0.0.1:8000/`. Stop the server with Ctrl+C. This serves only local files. Relative asset paths make this directory suitable for later static hosting, including GitHub Pages. Nothing has been deployed, pushed or submitted. The Pitch module and vendored Three.js files are loaded from this same directory; no network connection is required.
 
 Regenerate the full **generate → metrics → evidence → template** pipeline:
 
@@ -31,6 +31,7 @@ Generation requires Python 3.10+ and its standard library only. The tests additi
 3. **Scenario:** At a cursor of at least 10:00, freeze a snapshot. Adjust pressing intensity and flank bias. Compare the baseline continuation with the explicitly directional scenario. Later replay movement does not alter the frozen snapshot. Expand details for the source IDs and assumptions.
 4. **Publish:** Draft items can become Approved or Rejected. Only verified Approved items reach Broadcast. Rewinding before an item's evidence window ends hides it from Broadcast. Reset or reload clears decisions; there is no persistence or external publishing.
 5. Switch Fan / Analyst / Broadcast density and English / 中文. Broadcast density previews in other views do not constitute approval. Only the Publish view's Broadcast output contains approved captions.
+6. **Pitch:** At the same five-second cursor as Live, inspect the schematic positions of both fictional teams and the ball. Play, step, jump and either replay slider all move the shared cursor. Drag to rotate, scroll to zoom, right-drag to pan, or press Reset view. When a verified evidence window is active, its flank passing zone or pressing-event locations are highlighted from that claim's source events.
 
 ## Five-stage architecture
 
@@ -51,6 +52,13 @@ Fixed default seed: **20261024**. The generator uses a dedicated random.Random i
 - id, time (elapsed seconds), team, player, zone (left / center / right).
 - event_type (pass / pressure / shot / recovery), outcome, recovery_seconds (only for recovery events).
 - state: cumulative fictional score, possession_team, elapsed_seconds; and a synthetic label.
+- positions: 46-number flat array per sample: ball `[x,y]`, followed by the 22 players' `[x,y]` pairs in `position_players` order, all in metres and rounded to 0.1. Each position is labelled **SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations**.
+
+The schematic formations use fixed formation anchors in roster order (goalkeeper, four defenders, midfielders, forwards). Aster Quills attacks toward +x in a 4-4-2: `(-48.5,0)`; defenders `(-34,-23), (-35,-8), (-35,8), (-34,23)`; midfielders `(-16,-23), (-15,-8), (-15,8), (-16,23)`; forwards `(5,-10), (18,10)`. Mica Lanterns attacks toward −x in a 4-3-3: `(48.5,0)`; defenders `(34,-23), (35,-8), (35,8), (34,23)`; midfielders `(16,-18), (15,0), (16,18)`; forwards `(-5,-18), (-5,0), (-5,18)`. Anchors are formation references, not measured player locations.
+
+At each five-second step, seeded movement nudges each player toward a compact event-context shape, with a 3.8 m maximum step (45.6 km/h, below the required 10 m/s ceiling); coordinates are clamped to the 105 × 68 m pitch. The generated steps are typically much smaller. In minutes 25–30, the team with more scripted pressure events is pushed forward and its block compresses. In minutes 50–55, player targets shift toward the flank selected by that window's synthetic pass-zone mix. In minutes 75–80, movement is scaled down and capped at 1.35 m for slower recovery movement. A separate seeded random stream keeps position generation deterministic without changing the event stream. The ball sits with the current event's actor for pressure/recovery events, travels partway toward a schematic teammate on a pass, and moves toward that team's attacking goal on a shot. All ball coordinates are clamped to the pitch.
+
+The Pitch view builds its field, lines, goal frames, players and ball from Three.js primitives. It uses the local `vendor/three.module.js` and `vendor/OrbitControls.js` files only; Three.js v0.160.0 is MIT licensed and vendored under `vendor/`. There are no downloaded models, textures, remote scripts or other external assets. Its ES modules require HTTP(S) in browsers that block modules under `file://`; if module loading fails, the Pitch view shows the local-server command while the other views remain available.
 
 Default output contains **783 pass attempts and 27 shots**, broad illustrative football-scale magnitudes across both teams. These are design constraints, not calibration against a real match or empirical dataset. Event ordering, actors and outcomes are generated afresh from the seed. The schedule deliberately introduces more pressure actions in minute 25–30, flank-heavy passes in minute 50–55, and longer recovery observations in minute 75–80. The detectors still require measured window changes; time alone does not produce a claim.
 

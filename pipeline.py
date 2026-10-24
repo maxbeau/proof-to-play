@@ -11,7 +11,100 @@ LABEL = 'Synthetic / Simulated Match'
 VERSION = 'events-v1.0'
 TEAMS = ['Aster Quills', 'Mica Lanterns']
 ROSTERS = {t: [f'{p}-{i:02d}' for i in range(1, 12)] for t, p in zip(TEAMS, ['AQ', 'ML'])}
+POSITION_PLAYERS = [player for team in TEAMS for player in ROSTERS[team]]
+POSITION_LABEL = 'SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations'
 KINDS = {'pressing': ('pressing_proxy', 1), 'flank': ('flank_share_pct', 15), 'fatigue': ('recovery_seconds', 3)}
+
+# Roster order is goalkeeper, back line, midfield line, then forwards. The first
+# side attacks toward +x; the second mirrors it and attacks toward -x.
+FORMATIONS = {
+    TEAMS[0]: [(-48.5, 0), (-34, -23), (-35, -8), (-35, 8), (-34, 23),
+               (-16, -23), (-15, -8), (-15, 8), (-16, 23), (5, -10), (18, 10)],
+    TEAMS[1]: [(48.5, 0), (34, -23), (35, -8), (35, 8), (34, 23),
+               (16, -18), (15, 0), (16, 18), (-5, -18), (-5, 0), (-5, 18)]
+}
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+def position_samples(events, seed):
+    """Attach deterministic, schematic metre coordinates to each event sample."""
+    # Keep the event stream's random draws independent of all position details.
+    rng = random.Random(seed ^ 0x5A17C0DE)
+    player_index = {player: i for i, player in enumerate(POSITION_PLAYERS)}
+    team_offset = {team: i * 11 for i, team in enumerate(TEAMS)}
+    attack_sign = {TEAMS[0]: 1, TEAMS[1]: -1}
+    anchors = FORMATIONS
+
+    pressing_rows = [e for e in events if 25*60 <= e['time'] <= 30*60 and e['event_type'] == 'pressure']
+    pressing_team = max(TEAMS, key=lambda team: (sum(e['team'] == team for e in pressing_rows), -TEAMS.index(team)))
+    flank_rows = [e for e in events if 50*60 <= e['time'] <= 55*60 and e['event_type'] == 'pass']
+    flank_counts = {side: sum(e['zone'] == side for e in flank_rows) for side in ('left', 'right')}
+    flank_direction = -1 if flank_counts['left'] >= flank_counts['right'] else 1
+
+    player_positions = []
+    for team in TEAMS:
+        for x, y in anchors[team]:
+            player_positions.append([clamp(x + rng.uniform(-.8, .8), -52.5, 52.5),
+                                     clamp(y + rng.uniform(-.8, .8), -34, 34)])
+
+    last_ball = [0.0, 0.0]
+    for event in events:
+        t = event['time']
+        pressing = 25*60 <= t <= 30*60
+        flank = 50*60 <= t <= 55*60
+        fatigue = 75*60 <= t <= 80*60
+        zone_y = {'left': -18.0, 'center': 0.0, 'right': 18.0}[event['zone']]
+        for team in TEAMS:
+            is_pressing = pressing and team == pressing_team
+            compact_x = .88 if is_pressing else 1.0
+            compact_y = .78 if is_pressing else 1.0
+            flank_bias = flank_direction * (6.0 if team == event['team'] else 3.0) if flank else 0.0
+            contextual_y = zone_y * (.16 if team == event['team'] else .10)
+            contextual_x = attack_sign[team] * 2.0 if team == event['team'] else clamp(last_ball[0] * .10, -5, 5)
+            press_push = attack_sign[team] * 5.0 if is_pressing else 0.0
+            for local_i, (anchor_x, anchor_y) in enumerate(anchors[team]):
+                i = team_offset[team] + local_i
+                shape_center_x = sum(x for x, _ in anchors[team]) / 11
+                target_x = shape_center_x + (anchor_x - shape_center_x) * compact_x + contextual_x + press_push
+                target_y = anchor_y * compact_y + contextual_y + flank_bias
+                current_x, current_y = player_positions[i]
+                movement_scale = .5 if fatigue else 1.0
+                dx = (target_x - current_x + rng.gauss(0, .55)) * movement_scale
+                dy = (target_y - current_y + rng.gauss(0, .55)) * movement_scale
+                distance = (dx*dx + dy*dy) ** .5
+                step_cap = 1.35 if fatigue else 3.8
+                if distance > step_cap:
+                    dx *= step_cap / distance
+                    dy *= step_cap / distance
+                player_positions[i] = [clamp(current_x + dx, -52.5, 52.5),
+                                       clamp(current_y + dy, -34, 34)]
+
+        actor_i = player_index[event['player']]
+        actor = player_positions[actor_i]
+        if event['event_type'] == 'pass':
+            roster = ROSTERS[event['team']]
+            actor_slot = roster.index(event['player'])
+            receiver = roster[(actor_slot + 4) % len(roster)]
+            receiver_i = player_index[receiver]
+            recipient = player_positions[receiver_i]
+            progress = .68 if event['outcome'] == 'complete' else .42
+            ball = [actor[0] + (recipient[0] - actor[0]) * progress,
+                    actor[1] + (recipient[1] - actor[1]) * progress]
+        elif event['event_type'] == 'shot':
+            goal_x = attack_sign[event['team']] * 51.0
+            goal_y = clamp(actor[1] * .20, -3.2, 3.2)
+            ball = [actor[0] + (goal_x - actor[0]) * .82,
+                    actor[1] + (goal_y - actor[1]) * .82]
+        else:
+            ball = actor.copy()
+        ball = [clamp(ball[0], -52.5, 52.5), clamp(ball[1], -34, 34)]
+        flat = [round(ball[0], 1), round(ball[1], 1)]
+        for x, y in player_positions:
+            flat.extend((round(x, 1), round(y, 1)))
+        event['positions'] = flat
+        event['position_label'] = POSITION_LABEL
+        last_ball = ball
 
 def stamp(seconds):
     return (datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=seconds)).isoformat().replace('+00:00', 'Z')
@@ -42,6 +135,7 @@ def generate(seed=SEED):
                 outcome = 'recovered'
             recovery = (rng.randint(11, 15) if block == 15 else rng.randint(3, 6)) if kind == 'recovery' else None
             events.append({'id': f'E{len(events)+1:04d}', 'time': t, 'team': team, 'player': player, 'zone': zone, 'event_type': kind, 'outcome': outcome, 'recovery_seconds': recovery, 'state': {'score': score.copy(), 'possession_team': team, 'elapsed_seconds': t}, 'label': LABEL})
+    position_samples(events, seed)
     return events
 
 def window(events, start, end):
@@ -110,7 +204,13 @@ def build(seed=SEED):
     broken['event_ids'][0] = 'MISSING'
     broken['comparison']['second_half'] = 999
     broken['fact_check_status'] = 'Needs review'
-    return {'label': LABEL, 'seed': seed, 'formula_version': VERSION, 'teams': TEAMS, 'events': events, 'metrics': metrics(events, 0, 5400), 'insights': claims, 'broken_claim': broken, 'templates': {c['id']: {lang: {d: render(c, events, d, lang) for d in ['Fan', 'Analyst', 'Broadcast']} for lang in ['en', 'zh']} for c in claims}}
+    return {'label': LABEL, 'seed': seed, 'formula_version': VERSION, 'teams': TEAMS,
+            'position_label': POSITION_LABEL, 'position_players': POSITION_PLAYERS,
+            'position_encoding': '[ball_x, ball_y, then x,y pairs in position_players order; metres]',
+            'formations': {'Aster Quills': '4-4-2', 'Mica Lanterns': '4-3-3'},
+            'events': events, 'metrics': metrics(events, 0, 5400), 'insights': claims,
+            'broken_claim': broken,
+            'templates': {c['id']: {lang: {d: render(c, events, d, lang) for d in ['Fan', 'Analyst', 'Broadcast']} for lang in ['en', 'zh']} for c in claims}}
 
 def serialized(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n'
