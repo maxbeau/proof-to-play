@@ -1,4 +1,7 @@
-"""Run all acceptance checks locally. Node is only needed for JS verification."""
+"""Run local acceptance checks, including steering; derive totals from discovery.
+
+Node is only needed for JS verification. No fixed test total is maintained.
+"""
 from pathlib import Path
 import shutil
 import subprocess
