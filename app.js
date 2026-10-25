@@ -1,19 +1,20 @@
 /* Synthetic / Simulated Match — all UI is local, text-only DOM rendering. */
 'use strict';
 const M=window.MATCH,E=window.MatchEngine,$=id=>document.getElementById(id);
-let cursor=5,timer=null,frozen=null,queue={};
+let cursor=5,timer=null,frozen=null,queue={},sampleStarted=0;
+const SAMPLE_MS=window.PitchMotion.SAMPLE_MS;
 const all=[...M.insights,M.broken_claim];
 const clock=s=>Math.floor(s/60).toString().padStart(2,'0')+':'+(s%60).toString().padStart(2,'0');
 function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 function button(text,fn){const b=node('button',text);b.onclick=fn;return b;}
-function stop(){clearInterval(timer);timer=null;$('play').textContent='Play';$('play').setAttribute('aria-pressed','false');}
-function pitchUpdate(){
+function stop(snap=true){clearInterval(timer);timer=null;$('play').textContent='Play';$('play').setAttribute('aria-pressed','false');if(snap)pitchUpdate(true);}
+function pitchUpdate(snap=false){
  if(!window.PitchView)return;
  const current=M.events.find(e=>e.time===cursor),active=M.insights.find(c=>c.window_start<=cursor&&cursor<=c.window_end)||null;
- window.PitchView.update(cursor,current,active,M.events);
+ window.PitchView.update(cursor,current,active,M.events,{playing:timer!==null,started:sampleStarted,snap});
 }
 function view(name){document.querySelectorAll('main>section').forEach(s=>s.hidden=s.id!==name);document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===name)));if(name==='pitch'){pitchUpdate();window.PitchView?.resize();}}
-window.setMatchCursor=seconds=>{stop();cursor=Math.max(5,Math.min(5400,Math.round(Number(seconds)/5)*5));paint();};
+window.setMatchCursor=seconds=>{stop(false);cursor=Math.max(5,Math.min(5400,Math.round(Number(seconds)/5)*5));paint();};
 window.pitchModuleFailed=()=>{const message=$('pitch-fallback');if(message){message.hidden=false;message.textContent='Pitch view needs a local server or the GitHub Pages link; use python3 -m http.server 8000';$('pitch-canvas').hidden=true;}};
 window.pitchViewReady=api=>{window.PitchView=api;pitchUpdate();};
 function card(c,publishing=false,air=false){
@@ -66,10 +67,10 @@ function scenario(){
 all.forEach(c=>queue[c.id]='Draft');
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>view(b.dataset.view));
 $('pitch-timeline').oninput=()=>window.setMatchCursor(Number($('pitch-timeline').value));
-$('play').onclick=()=>{if(timer){stop();return;}if(cursor>=5400)cursor=5;$('play').textContent='Pause';$('play').setAttribute('aria-pressed','true');timer=setInterval(()=>{cursor=Math.min(5400,cursor+5);paint();if(cursor===5400)stop();},250);};
-$('step').onclick=()=>{stop();cursor=Math.min(5400,cursor+5);paint();};
-$('timeline').oninput=()=>{stop();cursor=Number($('timeline').value);paint();};
-M.insights.forEach(c=>$('jumps').append(button(c.kind+' · '+clock(c.window_end),()=>{stop();cursor=c.window_end;paint();})));
+$('play').onclick=()=>{if(timer){stop();return;}if(cursor>=5400)cursor=5;$('play').textContent='Pause';$('play').setAttribute('aria-pressed','true');sampleStarted=performance.now();timer=setInterval(()=>{cursor=Math.min(5400,cursor+5);sampleStarted=performance.now();paint();if(cursor===5400)stop();},SAMPLE_MS);paint();};
+$('step').onclick=()=>{stop(false);cursor=Math.min(5400,cursor+5);paint();};
+$('timeline').oninput=()=>{stop(false);cursor=Number($('timeline').value);paint();};
+M.insights.forEach(c=>$('jumps').append(button(c.kind+' · '+clock(c.window_end),()=>{stop(false);cursor=c.window_end;paint();})));
 $('density').onchange=paint;$('language').onchange=paint;
 $('freeze').onclick=()=>{stop();try{frozen=E.freeze(M.events,cursor,M.teams);$('freeze-status').textContent='Frozen at '+clock(cursor)+'. Moving replay will not change this snapshot.';scenario();}catch(err){$('freeze-status').textContent=err.message;}};
 $('press').oninput=scenario;$('flank').oninput=scenario;

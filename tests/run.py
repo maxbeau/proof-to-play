@@ -3,10 +3,18 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import re
+import unittest
 root=Path(__file__).resolve().parents[1]
 if not shutil.which('node'):
     sys.exit('FAIL: Node is required for browser-engine/UI tests (not for demo or generation).')
-for command in [[sys.executable,'-m','unittest','discover','-s','tests','-v'],['node','tests/browser.test.js']]:
-    result=subprocess.run(command,cwd=root)
-    if result.returncode:sys.exit(result.returncode)
-print('Acceptance suite: 23 passed, 0 failed.')
+suite = unittest.defaultTestLoader.discover(str(root/'tests'))
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+browser = subprocess.run(['node','tests/browser.test.js'], cwd=root, capture_output=True, text=True)
+print(browser.stdout, end='')
+print(browser.stderr, end='', file=sys.stderr)
+js_passed = len(re.findall(r'^PASS ', browser.stdout, re.MULTILINE))
+failed = len(result.failures) + len(result.errors) + int(browser.returncode != 0)
+passed = result.testsRun - len(result.failures) - len(result.errors) - len(result.skipped) + js_passed
+print(f'Acceptance suite: {passed} passed, {failed} failed, {len(result.skipped)} skipped.')
+sys.exit(0 if result.wasSuccessful() and browser.returncode == 0 else 1)

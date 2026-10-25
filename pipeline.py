@@ -3,6 +3,7 @@ import argparse
 import copy
 from datetime import datetime, timedelta, timezone
 import json
+import math
 from pathlib import Path
 import random
 
@@ -13,6 +14,9 @@ TEAMS = ['Aster Quills', 'Mica Lanterns']
 ROSTERS = {t: [f'{p}-{i:02d}' for i in range(1, 12)] for t, p in zip(TEAMS, ['AQ', 'ML'])}
 POSITION_PLAYERS = [player for team in TEAMS for player in ROSTERS[team]]
 POSITION_LABEL = 'SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations'
+BALL_STEP_CAP = 8.0  # metres per five-second sample, including rounding
+PLAYER_STEP_CAP = 3.8
+ROUNDING_MARGIN = .15  # maximum two-endpoint 0.1m rounding error is < .142m
 KINDS = {'pressing': ('pressing_proxy', 1), 'flank': ('flank_share_pct', 15), 'fatigue': ('recovery_seconds', 3)}
 
 # Roster order is goalkeeper, back line, midfield line, then forwards. The first
@@ -48,7 +52,10 @@ def position_samples(events, seed):
             player_positions.append([clamp(x + rng.uniform(-.8, .8), -52.5, 52.5),
                                      clamp(y + rng.uniform(-.8, .8), -34, 34)])
 
+    smooth_targets = [xy.copy() for xy in player_positions]
+    velocities = [[0.0, 0.0] for _ in player_positions]
     last_ball = [0.0, 0.0]
+    ball_target = None
     for event in events:
         t = event['time']
         pressing = 25*60 <= t <= 30*60
@@ -68,37 +75,44 @@ def position_samples(events, seed):
                 shape_center_x = sum(x for x, _ in anchors[team]) / 11
                 target_x = shape_center_x + (anchor_x - shape_center_x) * compact_x + contextual_x + press_push
                 target_y = anchor_y * compact_y + contextual_y + flank_bias
+                # Slow shared shape drift; context changes settle over tens of seconds.
+                target_x += 8 * math.sin(2 * math.pi * t / 180) * (.25 if local_i == 0 else 1)
+                target_y += 4 * math.sin(2 * math.pi * t / 240)
+                smooth_targets[i][0] += .12 * (target_x - smooth_targets[i][0])
+                smooth_targets[i][1] += .12 * (target_y - smooth_targets[i][1])
                 current_x, current_y = player_positions[i]
                 movement_scale = .5 if fatigue else 1.0
-                dx = (target_x - current_x + rng.gauss(0, .55)) * movement_scale
-                dy = (target_y - current_y + rng.gauss(0, .55)) * movement_scale
+                dx = .75 * velocities[i][0] + .25 * (.35 * (smooth_targets[i][0] - current_x) + rng.gauss(0, .06)) * movement_scale
+                dy = .75 * velocities[i][1] + .25 * (.35 * (smooth_targets[i][1] - current_y) + rng.gauss(0, .06)) * movement_scale
                 distance = (dx*dx + dy*dy) ** .5
-                step_cap = 1.35 if fatigue else 3.8
+                step_cap = (1.35 if fatigue else PLAYER_STEP_CAP) - ROUNDING_MARGIN
                 if distance > step_cap:
                     dx *= step_cap / distance
                     dy *= step_cap / distance
+                velocities[i] = [dx, dy]
                 player_positions[i] = [clamp(current_x + dx, -52.5, 52.5),
                                        clamp(current_y + dy, -34, 34)]
 
-        actor_i = player_index[event['player']]
-        actor = player_positions[actor_i]
-        if event['event_type'] == 'pass':
-            roster = ROSTERS[event['team']]
-            actor_slot = roster.index(event['player'])
-            receiver = roster[(actor_slot + 4) % len(roster)]
-            receiver_i = player_index[receiver]
-            recipient = player_positions[receiver_i]
-            progress = .68 if event['outcome'] == 'complete' else .42
-            ball = [actor[0] + (recipient[0] - actor[0]) * progress,
-                    actor[1] + (recipient[1] - actor[1]) * progress]
-        elif event['event_type'] == 'shot':
-            goal_x = attack_sign[event['team']] * 51.0
-            goal_y = clamp(actor[1] * .20, -3.2, 3.2)
-            ball = [actor[0] + (goal_x - actor[0]) * .82,
-                    actor[1] + (goal_y - actor[1]) * .82]
-        else:
-            ball = actor.copy()
-        ball = [clamp(ball[0], -52.5, 52.5), clamp(ball[1], -34, 34)]
+        # Finish a schematic trip before selecting another event's destination.
+        # Intermediate events remain intact; this is not a reconstruction of touches.
+        if ball_target is None or math.dist(last_ball, ball_target) < .4:
+            actor = player_positions[player_index[event['player']]]
+            if event['event_type'] == 'pass':
+                roster = ROSTERS[event['team']]
+                receiver = roster[(roster.index(event['player']) + 4) % len(roster)]
+                ball_target = player_positions[player_index[receiver]].copy()
+            elif event['event_type'] == 'shot':
+                ball_target = [attack_sign[event['team']] * 51.0, clamp(actor[1] * .20, -3.2, 3.2)]
+            else:
+                ball_target = actor.copy()
+        dx, dy = ball_target[0] - last_ball[0], ball_target[1] - last_ball[1]
+        distance = math.hypot(dx, dy)
+        travel = min(BALL_STEP_CAP - ROUNDING_MARGIN, distance * .4)
+        if distance < 1:
+            travel = distance
+        fraction = travel / distance if distance else 0
+        ball = [clamp(last_ball[0] + dx * fraction, -52.5, 52.5),
+                clamp(last_ball[1] + dy * fraction, -34, 34)]
         flat = [round(ball[0], 1), round(ball[1], 1)]
         for x, y in player_positions:
             flat.extend((round(x, 1), round(y, 1)))

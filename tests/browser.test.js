@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-global.window=global;require('../data/match.js');require('../engine.js');
+global.window=global;require('../data/match.js');require('../engine.js');require('../pitch-motion.js');
 const M=global.MATCH,E=global.MatchEngine;let count=0;
 function test(name,fn){fn();count++;console.log('PASS '+name);}
 test('browser metrics equal Python output in all evidence windows',()=>{assert.deepEqual(E.metrics(M.events,0,5400,M.teams),M.metrics);M.insights.forEach(c=>{assert(E.validate(c,M.events,M.teams));assert.deepEqual(E.metrics(M.events,c.window_start,c.window_end,M.teams),c.metric_value);});});
@@ -12,11 +12,46 @@ test('frozen scenario is deterministic, isolated and identity at zero',()=>{let 
 class Element{constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.value='';this.textContent='';this.hidden=false;this.attributes={};}append(...n){this.children.push(...n);}replaceChildren(...n){this.children=n;}setAttribute(k,v){this.attributes[k]=v;}}
 const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8'),els={};for(const match of html.matchAll(/id="([^"]+)"/g))els[match[1]]=new Element();els.density.value='Fan';els.language.value='en';els.press.value='0';els.flank.value='0';
 const nav=['live','evidence','scenario','publish','pitch'].map(name=>{let e=new Element('button');e.dataset.view=name;return e;});
-let pitchCursor=null,pitchResizes=0;global.PitchView={update:(seconds,event,claim)=>{pitchCursor={seconds,event,claim};},resize:()=>{pitchResizes++;}};
+let now=1000,tick=null,intervalMs=null;
+Object.defineProperty(global,'performance',{value:{now:()=>now},configurable:true});
+global.setInterval=(fn,ms)=>{tick=fn;intervalMs=ms;return 1;};global.clearInterval=()=>{tick=null;};
+const uiMotion=PitchMotion.createMotion();
+let pitchCursor=null,pitchResizes=0;global.PitchView={update:(seconds,event,claim,events,playback)=>{pitchCursor={seconds,event,claim,playback};uiMotion.update(seconds,event.positions,events.find(e=>e.time===seconds+5)?.positions,playback.playing,playback.started,now,playback.snap);},resize:()=>{pitchResizes++;}};
 global.document={getElementById:id=>els[id],createElement:tag=>new Element(tag),querySelectorAll:q=>q==='[data-view]'?nav:['live','evidence','scenario','publish','pitch'].map(id=>{els[id].id=id;return els[id];})};
 vm.runInThisContext(fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8'));
 const text=e=>e.textContent+' '+e.children.map(text).join(' ');
 test('actual UI initializes, jumps, freezes, adjusts and switches views',()=>{assert(text(els.clock).includes('00:05'));els.jumps.children[0].onclick();assert(text(els.clock).includes('30:00'));els.freeze.onclick();els.press.value='20';els.press.oninput();assert(text(els.comparison).includes('Directional scenario'));els.timeline.value='3300';els.timeline.oninput();assert(text(els['freeze-status']).includes('30:00'));nav[2].onclick();assert.equal(els.scenario.hidden,false);assert.equal(els.live.hidden,true);});
 test('Pitch and Live share the same cursor and sample',()=>{nav[4].onclick();assert.equal(els.pitch.hidden,false);assert(pitchResizes>0);els['pitch-timeline'].value='3330';els['pitch-timeline'].oninput();assert(text(els.clock).includes('55:30'));assert.equal(pitchCursor.seconds,3330);assert.equal(pitchCursor.event.time,3330);assert.equal(Number(els.timeline.value),3330);els.step.onclick();assert.equal(pitchCursor.seconds,3335);assert.equal(Number(els['pitch-timeline'].value),3335);});
 test('actual UI approves, broadcasts bilingual caption, rejects broken claim and resets',()=>{els.queue.children[0].children.at(-1).children[0].onclick();assert(text(els.broadcast).includes('Pressure actions increased'));els.language.value='zh';els.language.onchange();assert(text(els.broadcast).includes('压迫动作增加'));let held=els.queue.children.at(-1);assert.equal(held.children.at(-1).children[0].disabled,true);held.children.at(-1).children[1].onclick();assert(text(els.queue).includes('Rejected'));assert(!text(els.queue).includes('999'));els.reset.onclick();assert(text(els.broadcast).includes('No approved captions'));});
+test('interpolation clamps endpoints and interpolates every coordinate',()=>{
+ const a=M.events[0].positions,b=M.events[1].positions;
+ assert.deepEqual(PitchMotion.interpolate(a,b,-1),a);
+ assert.deepEqual(PitchMotion.interpolate(a,b,2),b);
+ assert.deepEqual(PitchMotion.interpolate(a,b,.5),a.map((v,i)=>v+(b[i]-v)*.5));
+});
+test('motion follows sample epochs without restarting on repeated updates',()=>{
+ const m=PitchMotion.createMotion(),a=[0,0],b=[10,20],c=[20,30];
+ m.update(5,a,b,true,1000,1000);assert.deepEqual(m.at(1125),[5,10]);
+ m.update(5,a,b,true,1000,1125);assert.deepEqual(m.at(1250),b);
+ m.update(10,b,c,true,1250,1250);assert.deepEqual(m.at(1250),b);assert.deepEqual(m.at(1375),[15,25]);
+ m.update(10,b,c,false,0,1375,true);assert.deepEqual(m.at(1375),b);assert.deepEqual(m.at(2000),b);
+});
+test('manual seeks glide from displayed pose and settle exactly, including rewind',()=>{
+ const m=PitchMotion.createMotion();m.update(5,[0,0],null,false,0,0);
+ m.update(10,[10,20],null,false,0,100);assert.deepEqual(m.at(100),[0,0]);assert.deepEqual(m.at(225),[5,10]);
+ m.update(5,[0,0],null,false,0,225);assert.deepEqual(m.at(225),[5,10]);assert.deepEqual(m.at(475),[0,0]);
+ m.update(5400,[30,40],null,true,500,500);assert.deepEqual(m.at(1000),[30,40]);
+});
+test('actual Play, Pause, Step and Jump handlers drive the motion clock',()=>{
+ window.setMatchCursor(5);now+=250;
+ els.play.onclick();assert.equal(intervalMs,250);assert.equal(pitchCursor.playback.playing,true);
+ const a=M.events[0].positions,b=M.events[1].positions;
+ now+=125;assert.deepEqual(uiMotion.at(now),PitchMotion.interpolate(a,b,.5));
+ now+=125;tick();assert.equal(pitchCursor.seconds,10);assert.deepEqual(uiMotion.at(now),b);
+ now+=125;els.play.onclick();assert.deepEqual(uiMotion.at(now),b);assert.equal(tick,null);
+ els.step.onclick();assert.deepEqual(uiMotion.at(now),b);now+=250;assert.deepEqual(uiMotion.at(now),M.events[2].positions);
+ const before=uiMotion.at(now);els.jumps.children[0].onclick();assert.deepEqual(uiMotion.at(now),before);now+=250;assert.deepEqual(uiMotion.at(now),pitchCursor.event.positions);
+ window.setMatchCursor(5395);now+=250;els.play.onclick();now+=250;tick();assert.equal(pitchCursor.seconds,5400);assert.equal(tick,null);assert.deepEqual(uiMotion.at(now),M.events.at(-1).positions);
+ els.play.onclick();assert.equal(pitchCursor.seconds,5);assert.equal(pitchCursor.playback.playing,true);els.play.onclick();
+});
 console.log(count+' browser-engine/UI tests passed; 0 failed (DOM harness, not a real browser).');

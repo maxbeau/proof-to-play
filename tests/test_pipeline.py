@@ -23,6 +23,8 @@ class Acceptance(unittest.TestCase):
     def test_positions_bounds_and_player_speed_cap(self):
         for event in self.events:
             self.assertEqual(len(event['positions']), 46)
+            self.assertEqual(event['position_label'], p.POSITION_LABEL)
+            self.assertTrue(all(value == round(value, 1) for value in event['positions']))
             coords = [event['positions'][0:2]] + [event['positions'][2+i*2:4+i*2] for i in range(22)]
             for x, y in coords:
                 self.assertTrue(-52.5 <= x <= 52.5)
@@ -31,7 +33,55 @@ class Acceptance(unittest.TestCase):
             for player in range(22):
                 i = 2 + player*2
                 distance = math.hypot(current['positions'][i]-previous['positions'][i], current['positions'][i+1]-previous['positions'][i+1])
-                self.assertLessEqual(distance, 50, f'{current["id"]}, player {player}: {distance}m/5s')
+                cap = 1.35 if 75*60 <= current['time'] <= 80*60 else p.PLAYER_STEP_CAP
+                self.assertLessEqual(distance, cap, f'{current["id"]}, player {player}: {distance}m/5s')
+
+    def test_ball_travel_cap_and_persistent_pass_shot_targets(self):
+        for seed in [p.SEED, p.SEED+1, 42]:
+            events = p.generate(seed)
+            for previous, current in zip(events, events[1:]):
+                self.assertLessEqual(math.dist(previous['positions'][:2], current['positions'][:2]), p.BALL_STEP_CAP)
+        # A new unrelated event must not replace an in-flight pass/shot destination.
+        for kind in ['pass', 'shot']:
+            events = copy.deepcopy(self.events[:4])
+            events[0].update(event_type=kind, team=p.TEAMS[0], player=p.ROSTERS[p.TEAMS[0]][0])
+            for event in events[1:]:
+                event.update(event_type='recovery', team=p.TEAMS[1], player=p.ROSTERS[p.TEAMS[1]][0])
+            p.position_samples(events, p.SEED)
+            first = events[0]['positions']
+            target = first[10:12] if kind == 'pass' else [51, 0]
+            distances = [math.dist(e['positions'][:2], target) for e in events]
+            self.assertTrue(all(b < a for a, b in zip(distances, distances[1:])), distances)
+
+    def test_player_smoothness_and_field_coverage(self):
+        for seed in [p.SEED, p.SEED+1, 42]:
+            events = p.generate(seed)
+            for i in range(2, 46, 2):
+                vectors = [(b['positions'][i]-a['positions'][i], b['positions'][i+1]-a['positions'][i+1])
+                           for a, b in zip(events, events[1:])]
+                lengths = [math.hypot(*v) for v in vectors]
+                self.assertLess(sum(lengths)/len(lengths), 1.5)
+                # Ignore <0.2m quantization jitter; reversal means a turn >120 degrees.
+                turns = [sum(x*y for x, y in zip(a, b))/(la*lb)
+                         for a, b, la, lb in zip(vectors, vectors[1:], lengths, lengths[1:]) if min(la, lb) >= .2]
+                self.assertGreater(len(turns), len(vectors)*.5)
+                self.assertLess(sum(c < -.5 for c in turns)/len(turns), .05)
+                xs = [e['positions'][i] for e in events]
+                # Goalkeepers may cover less ground; outfield players must keep roaming.
+                self.assertGreater(max(xs)-min(xs), 4 if i in (2, 24) else 10)
+
+    def test_nonposition_data_unchanged(self):
+        # Baselines captured before the continuity fix: includes metrics/evidence/templates.
+        expected = {
+            p.SEED: '18327c7466cb94dff22fb93cfae8eee1d63450d07f4d3c7eba7154fe3912acb7',
+            p.SEED+1: '2a269442c9a59476664161573cf03631ba8483244105e934b8ea5ad860aa3915',
+            42: 'f022d78126e4e45ff8087d6577652da3bf813d7ed5a820c54f3322527ae50db4'
+        }
+        for seed, digest in expected.items():
+            bundle = p.build(seed)
+            for event in bundle['events']:
+                del event['positions']
+            self.assertEqual(hashlib.sha256(p.serialized(bundle).encode()).hexdigest(), digest)
 
     def test_positions_change_with_seed_and_default_regeneration_is_identical(self):
         alternate = p.build(p.SEED+1)

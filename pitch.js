@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'OrbitControls';
 
 const M = window.MATCH;
+const motion = window.PitchMotion.createMotion();
 const canvas = document.getElementById('pitch-canvas');
 const pitchClock = document.getElementById('pitch-clock');
 const evidenceLabel = document.getElementById('pitch-evidence');
@@ -86,8 +87,10 @@ function addPlayers() {
     scene.add(group);
     players.push(group);
   });
-  ball = new THREE.Mesh(new THREE.SphereGeometry(.65, 16, 12), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .55 }));
-  ball.position.y = .75;
+  ball = new THREE.Mesh(new THREE.SphereGeometry(1.25, 20, 16), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: .45, roughness: .4 }));
+  const outline = new THREE.Mesh(new THREE.SphereGeometry(1.55, 20, 16), new THREE.MeshBasicMaterial({ color: 0x101020, side: THREE.BackSide }));
+  ball.add(outline);
+  ball.position.y = 1.6;
   scene.add(ball);
 }
 
@@ -139,14 +142,21 @@ function showHighlight(claim, events) {
   evidenceLabel.textContent = `${claim.kind} evidence window · ${clock(claim.window_start)}–${clock(claim.window_end)} · source events ${rows.length}`;
 }
 
-function update(seconds, event, claim, events) {
-  if (!event?.positions) return;
-  const flat = event.positions;
-  ball.position.set(flat[0], .75, flat[1]);
+function animatePositions(now) {
+  const flat = motion.at(now);
+  if (!flat) return;
+  ball.position.set(flat[0], 1.6, flat[1]);
   for (let i = 0; i < players.length; i += 1) {
     const x = flat[2 + i * 2], z = flat[3 + i * 2];
     players[i].position.set(x, 0, z);
   }
+}
+
+function update(seconds, event, claim, events, playback = {}) {
+  if (!event?.positions) return;
+  const next = events.find(row => row.time === seconds + 5);
+  const now = performance.now();
+  motion.update(seconds, event.positions, next?.positions, Boolean(playback.playing), playback.started ?? now, now, playback.snap);
   pitchTimeline.value = seconds;
   pitchClock.textContent = `${clock(seconds)} / 90:00 · Sample ${Math.floor(seconds / 5)}`;
   showHighlight(claim, events);
@@ -181,8 +191,8 @@ try {
   addPitch(); addPlayers(); addHighlight(); resetView(); resize();
   window.addEventListener('resize', resize);
   document.getElementById('pitch-reset')?.addEventListener('click', resetView);
-  const render = () => { controls.update(); renderer.render(scene, camera); requestAnimationFrame(render); };
-  render();
+  const render = now => { animatePositions(now); controls.update(); renderer.render(scene, camera); requestAnimationFrame(render); };
+  requestAnimationFrame(render);
   window.pitchViewReady?.({ update, resize, resetView });
 } catch (error) {
   fallback('Pitch view needs a local server or the GitHub Pages link; use python3 -m http.server 8000');
