@@ -1,6 +1,8 @@
 """Offline measurements; speeds are endpoint displacement / five seconds."""
 import math
+import statistics
 from collections import Counter, defaultdict
+from pipeline import POSITION_PLAYERS
 
 
 def roles():
@@ -46,7 +48,24 @@ def measure(events):
             shares.append(max(bins.values())/len(headings))
             spreads.append(1-math.hypot(sum(math.cos(h) for h in headings),sum(math.sin(h) for h in headings))/len(headings))
         ball.append(math.dist(a['positions'][:2],b['positions'][:2]))
+    duration = events[-1]['time']-events[0]['time']
+    actor_distances = []
+    nearest_distances = []
+    for event in events:
+        k = 2+2*POSITION_PLAYERS.index(event['player'])
+        actor_distances.append(math.dist(event['positions'][:2], event['positions'][k:k+2]))
+        nearest_distances.append(min(math.dist(event['positions'][:2], event['positions'][k:k+2]) for k in range(2,46,2)))
+    def ranges(rows):
+        return [[max(e['positions'][2+2*i+k] for e in rows)-min(e['positions'][2+2*i+k] for e in rows) for k in (0,1)] for i in range(22)]
     return {'role_mean_speed': {r:sum(v)/len(v) for r,v in speeds.items()},
+            'role_distance_km': {r:sum(v)/len(v)*duration/1000 for r,v in speeds.items()},
+            'player_distance_km': [sum(v)*5/1000 for v in individual],
+            'player_range_xy': ranges(events),
+            'player_first60_range_xy': ranges(events[:60]),
+            'player_peak_sample_speed': [max(v) for v in individual],
+            'ball_actor_mean': statistics.mean(actor_distances),
+            'ball_actor_median': statistics.median(actor_distances),
+            'ball_nearest_mean': statistics.mean(nearest_distances),
             'player_mean_speed': [sum(v)/len(v) for v in individual],
             'heading_mean_dominant_bin': sum(shares)/len(shares),
             'heading_max_dominant_bin': max(shares),

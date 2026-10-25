@@ -20,7 +20,7 @@ class Acceptance(unittest.TestCase):
         cls.bundle = cls.bundles[p.SEED]
         cls.events = cls.bundle['events']
         cls.measurements = {seed: measure(bundle['events']) for seed, bundle in cls.bundles.items()}
-        cls.baseline = json.loads((ROOT/'tests/movement_baseline.json').read_text())['seeds']
+        cls.before = json.loads((ROOT/'tests/unified_movement_before.json').read_text())['metrics']
 
     def test_role_attributes_and_seeded_variation(self):
         self.assertEqual(p.PLAYER_ROLES, roles())
@@ -37,57 +37,68 @@ class Acceptance(unittest.TestCase):
         self.assertGreater(p.ROLE_ATTRIBUTES['forward']['maxSpeed'], p.ROLE_ATTRIBUTES['defender']['maxSpeed'])
         self.assertLess(p.ROLE_ATTRIBUTES['winger']['response'], p.ROLE_ATTRIBUTES['defender']['response'])
 
-    def test_speed_diversity_across_roles_and_players(self):
-        # Adjacent role means must differ >=0.04m/s: GK < D < M < F < W.
-        order = ['goalkeeper', 'defender', 'midfielder', 'forward', 'winger']
+    def test_role_mean_speed_and_match_distance(self):
+        # Endpoint distance, not hidden substep path length. The stored interval
+        # duration is 5,395 seconds, rather than rounding it up to 90 minutes.
+        ranges = {'goalkeeper':(.7,1.0), 'defender':(1.6,1.9),
+                  'midfielder':(1.9,2.2), 'forward':(1.8,2.2), 'winger':(1.8,2.2)}
         for seed, stats in self.measurements.items():
-            means = stats['role_mean_speed']
-            for slower, faster in zip(order, order[1:]):
-                self.assertGreaterEqual(means[faster]-means[slower], .04, (seed, means))
-            self.assertGreater(max(stats['player_mean_speed'])-min(stats['player_mean_speed']), .3)
-            for role in order:
-                values = [s for s,r in zip(stats['player_mean_speed'], roles()) if r == role]
-                self.assertGreater(max(values)-min(values), .001)
-        old = self.baseline[str(p.SEED)]['metrics']['role_mean_speed']
-        self.assertLess(old['forward']-old['defender'], .04)  # old model fails
+            for role,(low,high) in ranges.items():
+                with self.subTest(seed=seed,role=role):
+                    self.assertTrue(low <= stats['role_mean_speed'][role] <= high, stats['role_mean_speed'])
+                    self.assertTrue(low*5.395 <= stats['role_distance_km'][role] <= high*5.395)
+                    values = [s for s,r in zip(stats['player_mean_speed'], roles()) if r == role]
+                    self.assertGreater(max(values)-min(values), .001)
+                    self.assertLess(self.before['role_mean_speed'][role],low)
+            self.assertGreater(max(stats['player_mean_speed'])-min(stats['player_mean_speed']), .8)
+            self.assertTrue(8 <= max(max(row['peak_speeds']) for row in self.traces[seed]) <= 10.1)
 
     def test_heading_diversity(self):
-        # Eight 45° bins; ignore <0.2m steps. Every timestamp <=75% in one
-        # bin; mean dominant share <45%; mean circular spread >0.45.
         for seed, stats in self.measurements.items():
-            self.assertLessEqual(stats['heading_max_dominant_bin'], .75, seed)
-            self.assertLess(stats['heading_mean_dominant_bin'], .45, seed)
+            self.assertLessEqual(stats['heading_max_dominant_bin'], .5, seed)
+            self.assertLess(stats['heading_mean_dominant_bin'], .4, seed)
             self.assertGreater(stats['heading_mean_circular_spread'], .45, seed)
-        self.assertGreater(self.baseline[str(p.SEED)]['metrics']['heading_mean_dominant_bin'], .45)
 
     def test_separation_and_formation_preserved(self):
         for seed, stats in self.measurements.items():
             self.assertGreaterEqual(stats['minimum_separation'], 1.5, seed)
             self.assertGreaterEqual(stats['minimum_replay_separation'], 1.5, seed)
             self.assertGreater(stats['minimum_team_rms_spread'], 16, seed)
-            self.assertGreater(stats['mean_centroid_ball_distance'], 18, seed)
             for event in self.bundles[seed]['events']:
                 for i in range(22):
                     x,y = event['positions'][2+2*i:4+2*i]
                     xmin,xmax,ymin,ymax = p.role_zone(i)
                     self.assertTrue(xmin-.05 <= x <= xmax+.05)
                     self.assertTrue(ymin-.05 <= y <= ymax+.05)
-                for offset, expected_x in ((2,-21.2),(24,16.1)):
+                for offset in (2,24):
                     xs = event['positions'][offset:offset+22:2]
                     ys = event['positions'][offset+1:offset+22:2]
-                    self.assertLess(abs(sum(xs)/11-expected_x), 10)
                     self.assertLess(abs(sum(ys)/11), 9)
                     self.assertGreater(max(xs)-min(xs), 35)
                     self.assertGreater(max(ys)-min(ys), 30)
 
-    def test_ball_coordinates_exactly_preserve_continuity_fix(self):
+    def test_ball_attaches_to_event_actor_and_nearest_player(self):
         for seed, bundle in self.bundles.items():
-            balls = [event['positions'][:2] for event in bundle['events']]
-            digest = hashlib.sha256(p.serialized(balls).encode()).hexdigest()
-            self.assertEqual(digest, self.baseline[str(seed)]['ball_sha256'])
-        stats = self.measurements[p.SEED]
-        self.assertAlmostEqual(stats['ball_mean_step'], 4.054249314069223, places=10)
-        self.assertAlmostEqual(stats['ball_max_step'], 7.951100552753687, places=10)
+            for event in bundle['events']:
+                i = 2+2*p.POSITION_PLAYERS.index(event['player'])
+                self.assertLessEqual(math.dist(event['positions'][:2],event['positions'][i:i+2]),1, (seed,event['id']))
+            self.assertLessEqual(self.measurements[seed]['ball_nearest_mean'],1)
+        self.assertGreater(self.before['ball_actor_mean'],30)
+        self.assertGreater(self.before['ball_nearest_mean'],5)
+
+    def test_team_shape_progresses_and_runs_persist(self):
+        for seed,bundle in self.bundles.items():
+            events=bundle['events']
+            for offset in (2,24):
+                centers=[sum(e['positions'][offset:offset+22:2])/11 for e in events]
+                self.assertGreater(max(centers)-min(centers),20,seed)
+            for i,role in enumerate(roles()):
+                k=2+i*2
+                xs=[e['positions'][k] for e in events]
+                self.assertGreater(max(xs)-min(xs),10 if role=='goalkeeper' else 40,(seed,i))
+                dx=[b-a for a,b in zip(xs,xs[1:])]
+                sustained=sum(all(v>1 for v in dx[j:j+3]) or all(v < -1 for v in dx[j:j+3]) for j in range(len(dx)-2))
+                self.assertGreater(sustained,20,(seed,i))
 
     def test_vehicle_acceleration_arrival_and_curved_motion(self):
         a = p.player_attributes(p.SEED)[9]
@@ -154,22 +165,75 @@ class Acceptance(unittest.TestCase):
                 cap = a['maxSpeed']*5 + p.ROUNDING_MARGIN
                 self.assertLessEqual(distance, cap, f'{current["id"]}, player {player}: {distance}m/5s')
 
-    def test_ball_travel_cap_and_persistent_pass_shot_targets(self):
-        for seed in [p.SEED, p.SEED+1, 42]:
-            events = self.bundles[seed]['events']
-            for previous, current in zip(events, events[1:]):
-                self.assertLessEqual(math.dist(previous['positions'][:2], current['positions'][:2]), p.BALL_STEP_CAP)
-        # A new unrelated event must not replace an in-flight pass/shot destination.
-        for kind in ['pass', 'shot']:
-            events = copy.deepcopy(self.events[:4])
-            events[0].update(event_type=kind, team=p.TEAMS[0], player=p.ROSTERS[p.TEAMS[0]][0])
-            for event in events[1:]:
-                event.update(event_type='recovery', team=p.TEAMS[1], player=p.ROSTERS[p.TEAMS[1]][0])
-            p._ball_continuity_samples(events, p.SEED)
-            first = events[0]['positions']
-            target = first[10:12] if kind == 'pass' else [51, 0]
-            distances = [math.dist(e['positions'][:2], target) for e in events]
-            self.assertTrue(all(b < a for a, b in zip(distances, distances[1:])), distances)
+    def test_pass_ball_starts_on_actor_receiver_segment(self):
+        # No recipient is stored. Only consecutive same-team actors are an
+        # unambiguous candidate segment; other observations require a handoff.
+        for seed,bundle in self.bundles.items():
+            for current,nxt in zip(bundle['events'],bundle['events'][1:]):
+                if current['event_type'] != 'pass' or current['team'] != nxt['team']:
+                    continue
+                a=2+2*p.POSITION_PLAYERS.index(current['player'])
+                b=2+2*p.POSITION_PLAYERS.index(nxt['player'])
+                origin=current['positions'][a:a+2];target=nxt['positions'][b:b+2]
+                ball=current['positions'][:2]
+                dx,dy=target[0]-origin[0],target[1]-origin[1]
+                q=dx*dx+dy*dy
+                t=max(0,min(1,((ball[0]-origin[0])*dx+(ball[1]-origin[1])*dy)/q)) if q else 0
+                self.assertLessEqual(math.dist(ball,[origin[0]+t*dx,origin[1]+t*dy]),1,(seed,current['id']))
+
+    def test_pass_shot_replay_flight_speed(self):
+        # A 20 m pass flying for 1 s then held for 4 s is 20 m/s, not 4 m/s.
+        # Endpoint / 5 s cannot measure that phase. Measure EVERY active flight
+        # leg and its actual duration; preserve 12–25 m/s and the 5 s deadline.
+        for seed,bundle in self.bundles.items():
+            plans=p.ball_flights(bundle['events'],seed)['plans']
+            for a,b in zip(bundle['events'],bundle['events'][1:]):
+                plan=plans[a['id']];segments=plan['segments']
+                self.assertEqual(plan['seconds'],b['time']-a['time'])
+                self.assertEqual(plan['receiver'],b['player'])
+                self.assertEqual(segments[0]['origin'],a['positions'][:2])
+                self.assertEqual(segments[0]['start'],0)
+                self.assertEqual(segments[-1]['target'],b['positions'][:2])
+                self.assertEqual(segments[-1]['end'],plan['seconds'])
+                self.assertEqual(segments[-1]['phase'],'held')
+                for previous,current in zip(segments,segments[1:]):
+                    self.assertEqual(previous['target'],current['origin'])
+                    self.assertEqual(previous['end'],current['start'])
+                for leg in segments:
+                    self.assertTrue(0 <= leg['start'] <= leg['end'] <= plan['seconds'])
+                    if leg['phase']=='waiting':
+                        self.assertEqual(leg['origin'],leg['target'])
+                        continue
+                    if leg['phase']=='held':
+                        continue
+                    self.assertGreater(leg['end'],leg['start'])
+                    speed=math.dist(leg['origin'],leg['target'])/(leg['end']-leg['start'])
+                    self.assertTrue(12 <= round(speed,8) <= 25,(seed,a['id'],speed))
+                if a['event_type']=='pass' and math.dist(a['positions'][:2],b['positions'][:2])>1:
+                    self.assertTrue(any(s['phase']=='pass' for s in segments),(seed,a['id']))
+                if a['event_type']=='shot':
+                    self.assertEqual(segments[0]['phase'],'shot')
+                    self.assertEqual(segments[0]['target'],[52.5 if a['team']==p.TEAMS[0] else -52.5,0])
+                    self.assertEqual(segments[1]['phase'],'rebound')
+                # Once received, ball and player share the SAME replay chord.
+                held=segments[-1];k=2+2*p.POSITION_PLAYERS.index(b['player'])
+                fraction=held['start']/plan['seconds']
+                receiver=[a['positions'][k+j]+(b['positions'][k+j]-a['positions'][k+j])*fraction for j in (0,1)]
+                self.assertLess(math.dist(held['origin'],receiver),1e-8)
+
+    def test_shot_goal_and_next_actor_fit_physical_budget(self):
+        # Fundamental acceptance constraint: outgoing shot + next event touch
+        # must fit without a reset or a >25m/s handoff. Do not relax this test.
+        impossible=[]
+        for seed,bundle in self.bundles.items():
+            for a,b in zip(bundle['events'],bundle['events'][1:]):
+                if a['event_type']!='shot':
+                    continue
+                goal=[52.5 if a['team']==p.TEAMS[0] else -52.5,0]
+                length=math.dist(a['positions'][:2],goal)+math.dist(goal,b['positions'][:2])
+                if length > 25*(b['time']-a['time']):
+                    impossible.append((seed,a['id'],round(length,1)))
+        self.assertFalse(impossible,f'{len(impossible)} shot/next-actor paths exceed 125 m; first {impossible[:5]}')
 
     def test_player_smoothness_and_field_coverage(self):
         for seed in [p.SEED, p.SEED+1, 42]:
@@ -204,7 +268,7 @@ class Acceptance(unittest.TestCase):
     def test_positions_change_with_seed_and_default_regeneration_is_identical(self):
         alternate = self.bundles[p.SEED+1]
         self.assertNotEqual([e['positions'] for e in self.events], [e['positions'] for e in alternate['events']])
-        files = ['match.json', 'match.js', 'events.jsonl']
+        files = ['match.json', 'match.js', 'events.jsonl', 'ball-flights.json', 'ball-flights.js']
         expected = {name: (ROOT/'data'/name).read_bytes() for name in files}
         subprocess.run([sys.executable, str(ROOT/'pipeline.py')], cwd=ROOT, check=True, capture_output=True, text=True)
         for name in files:
@@ -226,6 +290,9 @@ class Acceptance(unittest.TestCase):
     def test_full_pipeline_artifacts_current(self):
         self.assertEqual((ROOT/'data/match.json').read_text(), p.serialized(self.bundle))
         self.assertEqual((ROOT/'data/match.js').read_text(), 'window.MATCH = '+p.serialized(self.bundle).rstrip()+';'+chr(10))
+        flights=p.serialized(p.ball_flights(self.events))
+        self.assertEqual((ROOT/'data/ball-flights.json').read_text(),flights)
+        self.assertEqual((ROOT/'data/ball-flights.js').read_text(),'window.BALL_FLIGHTS = '+flights.rstrip()+';'+chr(10))
 
     def test_plausible_magnitudes(self):
         m = self.bundle['metrics']

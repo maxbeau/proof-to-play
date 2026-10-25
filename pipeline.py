@@ -14,8 +14,6 @@ TEAMS = ['Aster Quills', 'Mica Lanterns']
 ROSTERS = {t: [f'{p}-{i:02d}' for i in range(1, 12)] for t, p in zip(TEAMS, ['AQ', 'ML'])}
 POSITION_PLAYERS = [player for team in TEAMS for player in ROSTERS[team]]
 POSITION_LABEL = 'SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations'
-BALL_STEP_CAP = 8.0  # metres per five-second sample, including rounding
-BALL_REFERENCE_PLAYER_STEP_CAP = 3.8  # frozen ball destination guide only
 ROUNDING_MARGIN = .15  # maximum two-endpoint 0.1m rounding error is < .142m
 KINDS = {'pressing': ('pressing_proxy', 1), 'flank': ('flank_share_pct', 15), 'fatigue': ('recovery_seconds', 3)}
 
@@ -31,104 +29,15 @@ FORMATIONS = {
 def clamp(value, low, high):
     return max(low, min(high, value))
 
-def _ball_continuity_samples(events, seed):
-    """Frozen continuity guide: preserve previous ball destinations and RNG exactly."""
-    # Keep the event stream's random draws independent of all position details.
-    rng = random.Random(seed ^ 0x5A17C0DE)
-    player_index = {player: i for i, player in enumerate(POSITION_PLAYERS)}
-    team_offset = {team: i * 11 for i, team in enumerate(TEAMS)}
-    attack_sign = {TEAMS[0]: 1, TEAMS[1]: -1}
-    anchors = FORMATIONS
-
-    pressing_rows = [e for e in events if 25*60 <= e['time'] <= 30*60 and e['event_type'] == 'pressure']
-    pressing_team = max(TEAMS, key=lambda team: (sum(e['team'] == team for e in pressing_rows), -TEAMS.index(team)))
-    flank_rows = [e for e in events if 50*60 <= e['time'] <= 55*60 and e['event_type'] == 'pass']
-    flank_counts = {side: sum(e['zone'] == side for e in flank_rows) for side in ('left', 'right')}
-    flank_direction = -1 if flank_counts['left'] >= flank_counts['right'] else 1
-
-    player_positions = []
-    for team in TEAMS:
-        for x, y in anchors[team]:
-            player_positions.append([clamp(x + rng.uniform(-.8, .8), -52.5, 52.5),
-                                     clamp(y + rng.uniform(-.8, .8), -34, 34)])
-
-    smooth_targets = [xy.copy() for xy in player_positions]
-    velocities = [[0.0, 0.0] for _ in player_positions]
-    last_ball = [0.0, 0.0]
-    ball_target = None
-    for event in events:
-        t = event['time']
-        pressing = 25*60 <= t <= 30*60
-        flank = 50*60 <= t <= 55*60
-        fatigue = 75*60 <= t <= 80*60
-        zone_y = {'left': -18.0, 'center': 0.0, 'right': 18.0}[event['zone']]
-        for team in TEAMS:
-            is_pressing = pressing and team == pressing_team
-            compact_x = .88 if is_pressing else 1.0
-            compact_y = .78 if is_pressing else 1.0
-            flank_bias = flank_direction * (6.0 if team == event['team'] else 3.0) if flank else 0.0
-            contextual_y = zone_y * (.16 if team == event['team'] else .10)
-            contextual_x = attack_sign[team] * 2.0 if team == event['team'] else clamp(last_ball[0] * .10, -5, 5)
-            press_push = attack_sign[team] * 5.0 if is_pressing else 0.0
-            for local_i, (anchor_x, anchor_y) in enumerate(anchors[team]):
-                i = team_offset[team] + local_i
-                shape_center_x = sum(x for x, _ in anchors[team]) / 11
-                target_x = shape_center_x + (anchor_x - shape_center_x) * compact_x + contextual_x + press_push
-                target_y = anchor_y * compact_y + contextual_y + flank_bias
-                # Slow shared shape drift; context changes settle over tens of seconds.
-                target_x += 8 * math.sin(2 * math.pi * t / 180) * (.25 if local_i == 0 else 1)
-                target_y += 4 * math.sin(2 * math.pi * t / 240)
-                smooth_targets[i][0] += .12 * (target_x - smooth_targets[i][0])
-                smooth_targets[i][1] += .12 * (target_y - smooth_targets[i][1])
-                current_x, current_y = player_positions[i]
-                movement_scale = .5 if fatigue else 1.0
-                dx = .75 * velocities[i][0] + .25 * (.35 * (smooth_targets[i][0] - current_x) + rng.gauss(0, .06)) * movement_scale
-                dy = .75 * velocities[i][1] + .25 * (.35 * (smooth_targets[i][1] - current_y) + rng.gauss(0, .06)) * movement_scale
-                distance = (dx*dx + dy*dy) ** .5
-                step_cap = (1.35 if fatigue else BALL_REFERENCE_PLAYER_STEP_CAP) - ROUNDING_MARGIN
-                if distance > step_cap:
-                    dx *= step_cap / distance
-                    dy *= step_cap / distance
-                velocities[i] = [dx, dy]
-                player_positions[i] = [clamp(current_x + dx, -52.5, 52.5),
-                                       clamp(current_y + dy, -34, 34)]
-
-        # Finish a schematic trip before selecting another event's destination.
-        # Intermediate events remain intact; this is not a reconstruction of touches.
-        if ball_target is None or math.dist(last_ball, ball_target) < .4:
-            actor = player_positions[player_index[event['player']]]
-            if event['event_type'] == 'pass':
-                roster = ROSTERS[event['team']]
-                receiver = roster[(roster.index(event['player']) + 4) % len(roster)]
-                ball_target = player_positions[player_index[receiver]].copy()
-            elif event['event_type'] == 'shot':
-                ball_target = [attack_sign[event['team']] * 51.0, clamp(actor[1] * .20, -3.2, 3.2)]
-            else:
-                ball_target = actor.copy()
-        dx, dy = ball_target[0] - last_ball[0], ball_target[1] - last_ball[1]
-        distance = math.hypot(dx, dy)
-        travel = min(BALL_STEP_CAP - ROUNDING_MARGIN, distance * .4)
-        if distance < 1:
-            travel = distance
-        fraction = travel / distance if distance else 0
-        ball = [clamp(last_ball[0] + dx * fraction, -52.5, 52.5),
-                clamp(last_ball[1] + dy * fraction, -34, 34)]
-        flat = [round(ball[0], 1), round(ball[1], 1)]
-        for x, y in player_positions:
-            flat.extend((round(x, 1), round(y, 1)))
-        event['positions'] = flat
-        event['position_label'] = POSITION_LABEL
-        last_ball = ball
-
 # Schematic units: maxSpeed m/s, maxForce m/s² (unit mass), response seconds.
 # Fatigue is a speed/acceleration multiplier in minutes 75–80, not real physiology.
 # Wingers are wide midfielders in 4-4-2 and wide forwards in 4-3-3.
 ROLE_ATTRIBUTES = {
-    'goalkeeper': dict(maxSpeed=.8, maxForce=.45, response=3.8, stamina=.92, shift=.12, roam=1.8),
-    'defender': dict(maxSpeed=1.35, maxForce=.65, response=3.0, stamina=.78, shift=.38, roam=3.6),
-    'midfielder': dict(maxSpeed=2.1, maxForce=.95, response=2.2, stamina=.68, shift=.72, roam=5.8),
-    'winger': dict(maxSpeed=3.0, maxForce=1.4, response=1.5, stamina=.60, shift=1.05, roam=9.5),
-    'forward': dict(maxSpeed=2.7, maxForce=1.2, response=1.7, stamina=.64, shift=.95, roam=7.0),
+    'goalkeeper': dict(maxSpeed=4.0, maxForce=2.0, response=.85, stamina=.95, shift=.10, roam=5.0, width=7.5, period=47.0, runFraction=.50),
+    'defender': dict(maxSpeed=7.2, maxForce=3.2, response=.75, stamina=.90, shift=.60, roam=17.0, width=9.0, period=49.0, runFraction=.42),
+    'midfielder': dict(maxSpeed=8.3, maxForce=3.8, response=.65, stamina=.88, shift=.85, roam=24.0, width=12.0, period=58.0, runFraction=.40),
+    'winger': dict(maxSpeed=9.5, maxForce=4.8, response=.45, stamina=.86, shift=1.00, roam=31.0, width=7.0, period=65.0, runFraction=.22),
+    'forward': dict(maxSpeed=9.0, maxForce=4.2, response=.55, stamina=.88, shift=.95, roam=26.0, width=11.0, period=66.5, runFraction=.30),
 }
 PLAYER_ROLES = (['goalkeeper'] + ['defender']*4
                 + ['winger', 'midfielder', 'midfielder', 'winger'] + ['forward']*2
@@ -136,22 +45,23 @@ PLAYER_ROLES = (['goalkeeper'] + ['defender']*4
                 + ['winger', 'forward', 'winger'])
 STEERING_DT = .1
 PERSONAL_SPACE = 2.0
-CONTACT_DISTANCE = 1.65  # >=1.50m after two-endpoint 0.1m quantization.
+CONTACT_DISTANCE = 1.85  # >=1.50m after two-endpoint 0.1m quantization.
 
 
 def player_attributes(seed):
-    """Independent RNG: neither event draws nor frozen ball-path draws are consumed."""
+    """Independent seeded movement attributes; never consume event RNG draws."""
     rng = random.Random(seed ^ 0x71A6BEEF)
     result = []
     for role in PLAYER_ROLES:
         attributes = {key: value*rng.uniform(.94, 1.06)
                       for key, value in ROLE_ATTRIBUTES[role].items()}
         attributes.update(role=role, phase=rng.uniform(0, 2*math.pi),
-                          period=rng.uniform(46, 78)*(.85 if role == 'winger' else 1),
                           weights={name: weight*rng.uniform(.9, 1.1) for name, weight in
                                    [('anchor', 1), ('pursuit', .85), ('mark', .65),
                                     ('space', .55), ('wander', .18), ('separation', 2.8)]})
         result.append(attributes)
+    for attributes in result:
+        attributes['arc_direction'] = rng.choice((-1, 1))
     return result
 
 
@@ -176,11 +86,124 @@ def vehicle_step(position, velocity, desired, attributes, fatigue=1):
 
 
 def role_zone(i):
+    """Broad tactical lanes, not kickoff-centred cages (synthetic/schematic)."""
     x, y = FORMATIONS[TEAMS[i//11]][i%11]
     role = PLAYER_ROLES[i]
-    rx, ry = {'goalkeeper': (3, 6), 'defender': (10, 7), 'midfielder': (13, 9),
-              'winger': (16, 8), 'forward': (17, 11)}[role]
-    return max(-52, x-rx), min(52, x+rx), max(-33.5, y-ry), min(33.5, y+ry)
+    if role == 'goalkeeper':
+        return (-51.5, -38, -11, 11) if i < 11 else (38, 51.5, -11, 11)
+    half_width = {'defender': 9, 'midfielder': 13, 'winger': 8, 'forward': 13}[role]
+    xmin, xmax = (0, 50) if role == 'forward' and i < 11 else (-50, 0) if role == 'forward' else (-50, 50)
+    return xmin, xmax, max(-32.5, y-half_width), min(32.5, y+half_width)
+
+
+def run_zone(i):
+    """Keep the wide defensive screen inside its unchanged legal role zone.
+
+    Its two sides retain at least 32 m width while independent midfield and
+    wing runs turn inward. This is a route constraint, not a test exemption.
+    """
+    xmin,xmax,ymin,ymax = role_zone(i)
+    if PLAYER_ROLES[i]=='defender' and i%11 in (1,4):
+        if ymin < 0:
+            ymax = min(ymax,-16)
+        else:
+            ymin = max(ymin,16)
+    return xmin,xmax,ymin,ymax
+
+
+def run_target(i, a, now, territory, possession, pressing, tired, flank_direction):
+    """A sustained advance then recovery on a role-shaped closed route.
+
+    The short attacking leg gives wide players sprint opportunities; the long
+    recovery leg pays for those bursts in the match displacement budget. Each
+    player's phase/period is independent. Lateral arcs make turns continuous.
+    """
+    sign = 1 if i < 11 else -1
+    anchor = FORMATIONS[TEAMS[i//11]][i%11]
+    role = a['role']
+    u = (now/a['period'] + a['phase']/(2*math.pi)) % 1
+    fraction = a['runFraction']
+    theta = math.pi*u/fraction if u < fraction else math.pi+math.pi*(u-fraction)/(1-fraction)
+    if role == 'goalkeeper':
+        center = [-45*sign + a['shift']*territory, 0]
+    else:
+        base_x = {'defender': -25, 'midfielder': -4, 'winger': 0, 'forward': 14}[role]
+        tactical = 3-6*abs(i//11-possession) + (3 if pressing else 0)
+        center = [sign*(base_x+tactical) + a['shift']*territory, anchor[1]]
+    fatigue = a['stamina'] if tired else 1
+    zone = run_zone(i)
+    # Fit the complete curved route inside the lane. Clipping individual
+    # target coordinates created stationary wall segments followed by U-turns.
+    rx = min(a['roam']*fatigue, (zone[1]-zone[0])/2)
+    ry = min(a['width'], (zone[3]-zone[2])/2)
+    center[0] = clamp(center[0], zone[0]+rx, zone[1]-rx)
+    if flank_direction and role == 'winger':
+        center[1] += flank_direction*2
+    center[1] = clamp(center[1], zone[2]+ry, zone[3]-ry)
+    if role == 'goalkeeper':
+        dx, dy = -rx*math.cos(theta), ry*math.sin(theta)
+    else:
+        # Give each 180-degree turn ten seconds. A narrow ellipse rushes its
+        # tight ends, producing >120-degree changes between five-second chords.
+        turn = 10.0
+        straight = a['period']-2*turn
+        advance = straight*fraction
+        recover = straight-advance
+        clock = u*a['period']
+        half = max(0, rx-ry)
+        arc = ry*(.42+.08*math.sin(a['phase']))
+        if clock < advance:
+            progress = clock/advance
+            lateral = progress+.1*math.sin(2*math.pi*progress+a['phase'])*math.sin(math.pi*progress)**2
+            dx, dy = -half+2*half*progress, ry-arc*math.sin(math.pi*lateral)**2
+        elif clock < advance+turn:
+            angle = math.pi*(clock-advance)/turn
+            dx, dy = half+ry*math.sin(angle), ry*math.cos(angle)
+        elif clock < advance+turn+recover:
+            progress = (clock-advance-turn)/recover
+            lateral = progress+.1*math.sin(2*math.pi*progress-a['phase'])*math.sin(math.pi*progress)**2
+            dx, dy = half-2*half*progress, -ry+arc*math.sin(math.pi*lateral)**2
+        else:
+            angle = math.pi*(clock-advance-turn-recover)/turn
+            dx, dy = -half-ry*math.sin(angle), -ry*math.cos(angle)
+    target = [center[0]+sign*dx, center[1]+a['arc_direction']*dy]
+    return target, 'advance' if u < fraction else 'recover'
+
+
+def shot_arrivals(events):
+    """Spatial commitments only; immutable event actors/times are not rewritten.
+
+    Reserve 13 m of the 125 m shot-plus-return budget for steering/rounding.
+    Each actor approaches its feasible goal-centred receiving region ahead
+    of the shot, including the long return when a goalkeeper is next to touch.
+    """
+    arrivals = [[] for _ in POSITION_PLAYERS]
+    for event, nxt in zip(events, events[1:]):
+        if event['event_type'] != 'shot':
+            continue
+        goal = [52.5 if event['team'] == TEAMS[0] else -52.5, 0]
+        actors = [POSITION_PLAYERS.index(e['player']) for e in (event, nxt)]
+        minimum = [math.dist(goal, in_zone(goal, run_zone(i))) for i in actors]
+        slack = 125-sum(minimum)
+        if slack < 0:
+            raise ValueError(f'{event["id"]}: role zones cannot fit shot/return budget')
+        spare = slack-min(13,slack/2)
+        for e, i, distance in zip((event, nxt), actors, minimum):
+            arrivals[i].append((e['time'], goal, distance+spare/2))
+    return arrivals
+
+
+def arrive_for_shot(target, now, commitments, zone):
+    for deadline, goal, radius in commitments:
+        remaining = deadline-now
+        if not -15 <= remaining <= 50:
+            continue
+        # Gradual convergence well before the touch, then release the run.
+        radius += max(0, remaining-5)*1.1 + max(0, -remaining)*2.0
+        distance = math.dist(target, goal)
+        if distance > radius:
+            target = in_zone([goal[k]+(target[k]-goal[k])*radius/distance for k in (0, 1)], zone)
+    return target
 
 
 def in_zone(point, zone):
@@ -213,25 +236,26 @@ def assign_behaviours(positions, ball, possession, pressing):
 
 
 def position_samples(events, seed, diagnostics=None):
-    """Integrate 22 independent steering vehicles; only position arrays change.
+    """One synthetic/schematic simulation: balls use the displayed actors.
 
-    The prior ball-continuity model remains a frozen destination guide. Its
-    reference formation paths are NOT displayed players or steering targets.
-    Keeping this guide decoupled preserves every prior ball coordinate, not just
-    its mean/max step. The schematic ball need not coincide with an event actor.
+    Event actors are independent observations, not a continuous possession
+    chain. Each stored sample is the event's touch, using the final displayed
+    player coordinates. Anticipated shot arrivals fit the goal-and-return path
+    into the five-second budget without moving a sample after integration.
     """
-    _ball_continuity_samples(events, seed)
     attributes = player_attributes(seed)
+    arrivals = shot_arrivals(events)
     pressures = [e for e in events if 1500 <= e['time'] <= 1800 and e['event_type'] == 'pressure']
     pressing_team = max(range(2), key=lambda team: (sum(e['team'] == TEAMS[team] for e in pressures), -team))
     flank_passes = [e for e in events if 3000 <= e['time'] <= 3300 and e['event_type'] == 'pass']
     flank_direction = -1 if sum(e['zone'] == 'left' for e in flank_passes) >= sum(e['zone'] == 'right' for e in flank_passes) else 1
-    zones = [role_zone(i) for i in range(22)]
+    zones = [run_zone(i) for i in range(22)]
     positions = [list(anchor) for team in TEAMS for anchor in FORMATIONS[team]]
     velocities = [[0., 0.] for _ in positions]
-    targets = [xy.copy() for xy in positions]
-    previous_ball = [0., 0.]
-    ball_velocity = [0., 0.]
+    previous_ball = positions[POSITION_PLAYERS.index(events[0]['player'])].copy()
+    territory = 0.0
+    territory_velocity, territory_aim = 0.0, 0.0
+    shape_possession = TEAMS.index(events[0]['state']['possession_team'])
     possession, phase, assigned_at = None, None, -30
     modes, opponents = [], []
     pending_possession, pending_count = None, 0
@@ -250,63 +274,50 @@ def position_samples(events, seed, diagnostics=None):
         if possession is None or new_phase != phase or (candidate != possession and pending_count >= 3 and t-assigned_at >= 30):
             possession, phase, assigned_at = candidate, new_phase, t
             modes, opponents = assign_behaviours(positions, previous_ball, possession, pressing and 1-possession == pressing_team)
+            territory_aim = clamp(previous_ball[0], -28, 28)
         if diagnostics is not None:
             diagnostics.append({'time': t, 'modes': modes.copy(), 'possession': possession,
                                 'phase': phase, 'assigned_at': assigned_at, 'ball': previous_ball.copy(),
                                 'assignment_positions': [xy.copy() for xy in positions] if assigned_at == t else None})
-        ball = event['positions'][:2]
-        # Only previously observed ball velocity is available to pursuit.
-        predicted_ball = [previous_ball[k]+ball_velocity[k]*1.5 for k in (0, 1)]
         sample_start = [xy.copy() for xy in positions]
+        contact_planes = []
+        for i in range(22):
+            for j in range(i+1,22):
+                sx,sy = sample_start[i][0]-sample_start[j][0],sample_start[i][1]-sample_start[j][1]
+                contact_planes.append((i,j,sx,sy))
+        peak_speeds = [0.0]*22
+        run_phases = []
         for substep in range(50):
             now = t-5+(substep+1)*STEERING_DT
+            # Follow the actual prior possessor with a tactical response time;
+            # the ball is never supplied by a second player simulation.
+            # Do not jerk every route centre toward a new independent actor
+            # every five seconds. Tactical arrivals have persistent velocity,
+            # gentle acceleration and the same debounced assignment lifetime.
+            territory_desired = clamp((territory_aim-territory)/10, -1, 1)
+            territory_velocity += STEERING_DT*clamp((territory_desired-territory_velocity)/6, -.15, .15)
+            territory += STEERING_DT*territory_velocity
+            shape_possession += STEERING_DT/8*(possession-shape_possession)
             desired = []
+            run_phases = []
             for i, a in enumerate(attributes):
-                team = i//11
-                sign = 1 if team == 0 else -1
-                anchor = FORMATIONS[TEAMS[team]][i%11]
-                w = a['weights']
-                is_pressing = pressing and team == pressing_team
-                shift_x = 5*math.sin(now*2*math.pi/180)+sign*(3 if team == possession else 0)
-                shift_y = 3*math.sin(now*2*math.pi/240)
-                # Phase effects alter steering weights/attributes, not a shared jump.
-                anchor_weight = w['anchor']*(1.25 if is_pressing else 1)
-                shift = a['shift']
-                theta = now*2*math.pi/a['period']+a['phase']
-                roam = a['roam']*(a['stamina'] if tired else 1)
-                base = [anchor[0]+shift*shift_x+roam*math.sin(theta),
-                        anchor[1]+shift*shift_y+roam*.6*math.cos(theta*.73+a['phase'])]
-                if flank and a['role'] == 'winger':
-                    base[1] += flank_direction*4*w['space']
-                target = base.copy()
+                target, run_phase = run_target(i, a, now, territory, shape_possession, pressing and i//11 == pressing_team, tired, flank_direction if flank else 0)
+                future, _ = run_target(i, a, now+STEERING_DT, territory, shape_possession, pressing and i//11 == pressing_team, tired, flank_direction if flank else 0)
+                target = arrive_for_shot(target, now, arrivals[i], zones[i])
+                future = arrive_for_shot(future, now+STEERING_DT, arrivals[i], zones[i])
+                run_phases.append(run_phase)
+                # Feed-forward follows a sustained route, while arrive corrects
+                # tracking error. Physical velocity/acceleration stay persistent.
+                velocity = [(future[k]-target[k])/STEERING_DT + (target[k]-positions[i][k])/a['response'] for k in (0,1)]
                 mode = modes[i]
                 if mode == 'presser':
-                    pursuit = w['pursuit']*(1.5 if pressing else 1)
-                    target = [(base[k]*anchor_weight+predicted_ball[k]*pursuit)/(anchor_weight+pursuit) for k in (0, 1)]
+                    pursuit = limit_vector(previous_ball[0]-positions[i][0], previous_ball[1]-positions[i][1], 1.2 if pressing else .5)
+                    velocity = [velocity[k]+pursuit[k]*a['weights']['pursuit'] for k in (0,1)]
                 elif mode == 'marker':
                     opponent = positions[opponents[i]]
-                    # Interpose 30% toward own goal, not on the opponent.
-                    interpose = [opponent[0]*.7-sign*52.5*.3, opponent[1]*.7]
-                    target = [(base[k]+interpose[k]*w['mark'])/(1+w['mark']) for k in (0, 1)]
-                elif mode in ('runner', 'supporter'):
-                    # Local pitch-control proxy: select free space, away from ball.
-                    # Candidates remain inside the player's own formation zone.
-                    radius = 4 if mode == 'runner' else 2
-                    candidates = [in_zone([base[0]+dx*radius, base[1]+dy*radius], zones[i])
-                                  for dx,dy in ((0,0),(1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1))]
-                    rivals = positions[(1-team)*11:(2-team)*11]
-                    free = max(candidates, key=lambda q: min(math.dist(q,r) for r in rivals)+.35*math.dist(q, previous_ball))
-                    target = [base[k]+w['space']*(free[k]-base[k]) for k in (0, 1)]
-                # Seeded, low-weight coherent wander; different phase/frequency per player.
-                target[0] += w['wander']*math.cos(theta*1.31)
-                target[1] += w['wander']*math.sin(theta*1.17)
-                target = in_zone(target, zones[i])
-                for k in (0, 1):
-                    targets[i][k] += STEERING_DT/(a['response']*2)*(target[k]-targets[i][k])
-                dx, dy = targets[i][0]-positions[i][0], targets[i][1]-positions[i][1]
-                # Arrive: seek at maxSpeed outside the braking radius, ease inside.
+                    velocity[1] += clamp((opponent[1]-positions[i][1])*.04,-.6,.6)*a['weights']['mark']
                 fatigue = a['stamina'] if tired else 1
-                desired.append(list(limit_vector(dx/a['response'], dy/a['response'], a['maxSpeed']*fatigue)))
+                desired.append(list(limit_vector(*velocity, a['maxSpeed']*fatigue)))
             # Symmetric social repulsion applies across BOTH teams. Snapshot update
             # avoids roster-order advantage. Only near neighbours contribute.
             for i in range(22):
@@ -327,40 +338,150 @@ def position_samples(events, seed, diagnostics=None):
             for i, a in enumerate(attributes):
                 fatigue = a['stamina'] if tired else 1
                 positions[i], velocities[i] = vehicle_step(positions[i], velocities[i], desired[i], a, fatigue)
+                peak_speeds[i] = max(peak_speeds[i], math.hypot(*velocities[i]))
                 bounded = in_zone(positions[i], zones[i])
                 for k in (0, 1):
                     if bounded[k] != positions[i][k]:
                         velocities[i][k] = 0
                 positions[i] = bounded
-            # Swept hard-disc constraint: both integrated positions AND the
-            # browser chord from the last stored sample must be nonpenetrating.
-            # Enforce each substep to avoid large end-of-sample corrections.
-            for _ in range(6):
+            # Test the actual chord, not a fixed start-normal half-plane. The
+            # latter forbids safe side-by-side passing and kicks players back
+            # into their old lane. For an unsafe chord choose a tangent plane
+            # feasible at the start, then slide along it. No division by the
+            # closest-approach fraction, and the complete replay stays clear.
+            for _ in range(16):
                 contact = False
-                for i in range(22):
-                    for j in range(i+1,22):
-                        dx, dy = positions[i][0]-positions[j][0], positions[i][1]-positions[j][1]
-                        sx = sample_start[i][0]-sample_start[j][0]
-                        sy = sample_start[i][1]-sample_start[j][1]
-                        if (dx*sx > 0 and min(abs(dx),abs(sx)) >= CONTACT_DISTANCE or
-                                dy*sy > 0 and min(abs(dy),abs(sy)) >= CONTACT_DISTANCE):
-                            continue
-                        ux,uy = dx-sx,dy-sy
-                        length2 = ux*ux+uy*uy
-                        alpha = clamp(-(sx*ux+sy*uy)/length2,0,1) if length2 else 1
-                        cx,cy = sx+alpha*ux,sy+alpha*uy
-                        distance = math.hypot(cx,cy)
-                        if distance < CONTACT_DISTANCE and alpha > 1e-8:
-                            nx,ny = (cx/distance,cy/distance) if distance else (1.,0.)
-                            correction = (CONTACT_DISTANCE-distance)/(2*alpha)+.00001
-                            positions[i] = in_zone([positions[i][0]+nx*correction,positions[i][1]+ny*correction],zones[i])
-                            positions[j] = in_zone([positions[j][0]-nx*correction,positions[j][1]-ny*correction],zones[j])
-                            contact = True
+                for i,j,sx,sy in contact_planes:
+                    dx,dy = positions[i][0]-positions[j][0], positions[i][1]-positions[j][1]
+                    if ((sx >= CONTACT_DISTANCE and dx >= CONTACT_DISTANCE) or
+                        (sx <= -CONTACT_DISTANCE and dx <= -CONTACT_DISTANCE) or
+                        (sy >= CONTACT_DISTANCE and dy >= CONTACT_DISTANCE) or
+                        (sy <= -CONTACT_DISTANCE and dy <= -CONTACT_DISTANCE)):
+                        continue
+                    vx,vy = dx-sx,dy-sy
+                    q = vx*vx+vy*vy
+                    fraction = clamp(-(sx*vx+sy*vy)/q,0,1) if q else 0
+                    cx,cy = sx+fraction*vx,sy+fraction*vy
+                    clearance = math.hypot(cx,cy)
+                    if clearance >= CONTACT_DISTANCE-1e-4:
+                        continue
+                    length = math.hypot(sx,sy)
+                    angle = math.acos(min(1,CONTACT_DISTANCE/length))
+                    side = 1 if sx*dy-sy*dx > 0 else -1
+                    choices = []
+                    for rotation in (side*angle,-side*angle,0):
+                        cosine,sine = math.cos(rotation),math.sin(rotation)
+                        nx,ny = (sx*cosine-sy*sine)/length,(sx*sine+sy*cosine)/length
+                        deficit = max(0,CONTACT_DISTANCE-dx*nx-dy*ny)+2e-6
+                        axes = []
+                        for player,direction in ((i,1),(j,-1)):
+                            for k,normal in enumerate((nx,ny)):
+                                movement = direction*normal
+                                if abs(movement)>1e-12:
+                                    boundary = zones[player][2*k+(1 if movement>0 else 0)]
+                                    room = max(0,(boundary-positions[player][k])*(1 if movement>0 else -1))
+                                    axes.append((player,k,movement,room))
+                        capacity = sum(abs(component)*room for _,_,component,room in axes)
+                        choices.append((deficit+(1e6 if capacity<deficit else 0),nx,ny,axes))
+                    # A lane wall may block the naturally preferred side. Use
+                    # the other tangent before pushing anyone into that wall.
+                    _,nx,ny,axes = min(choices,key=lambda choice:choice[0])
+                    gap = dx*nx+dy*ny
+                    if gap < CONTACT_DISTANCE-1e-4:
+                        correction = CONTACT_DISTANCE-gap+2e-6
+                        # Box-constrained plane projection: when a lateral
+                        # axis reaches its lane wall, the free longitudinal
+                        # axes still brake the crossing. Do not discard the
+                        # entire correction just because one axis is blocked.
+                        while axes and correction>1e-10:
+                            scale = correction/sum(component*component for _,_,component,_ in axes)
+                            blocked = [axis for axis in axes if scale*abs(axis[2])>axis[3]]
+                            if not blocked:
+                                for player,k,component,_ in axes:
+                                    positions[player][k] += scale*component
+                                break
+                            for axis in blocked:
+                                player,k,component,room = axis
+                                positions[player][k] += math.copysign(room,component)
+                                correction -= abs(component)*room
+                                axes.remove(axis)
+                        positions[i] = in_zone(positions[i],zones[i])
+                        positions[j] = in_zone(positions[j],zones[j])
+                        closing = (velocities[i][0]-velocities[j][0])*nx+(velocities[i][1]-velocities[j][1])*ny
+                        if closing < 0:
+                            for k, normal in enumerate((nx,ny)):
+                                velocities[i][k] -= normal*closing/2
+                                velocities[j][k] += normal*closing/2
+                        contact = True
                 if not contact:
                     break
-        event['positions'][2:] = [round(value,1) for xy in positions for value in xy]
-        ball_velocity = [(ball[k]-previous_ball[k])/5 for k in (0,1)]
+        flat = [round(value,1) for xy in positions for value in xy]
+        actor = POSITION_PLAYERS.index(event['player'])
+        ball = flat[2*actor:2*actor+2]
+        event['positions'] = ball + flat
+        event['position_label'] = POSITION_LABEL
+        if diagnostics is not None:
+            diagnostics[-1].update(territory=territory, run_phases=run_phases, peak_speeds=peak_speeds)
         previous_ball = ball
+
+
+def ball_flights(events, seed=SEED):
+    """Spatial-only sidecar: flight legs followed by held receiver motion.
+
+    The receiver is the next observed actor, not an inferred successful pass.
+    Interception solves against the same linear player path used in replay.
+    No leg may be cut short or snapped to a new actor at the next sample.
+    """
+    plans = {}
+    for event, nxt in zip(events, events[1:]):
+        seconds = nxt['time']-event['time']
+        origin = event['positions'][:2]
+        endpoint = nxt['positions'][:2]
+        offset = 2+2*POSITION_PLAYERS.index(nxt['player'])
+        receiver_start = event['positions'][offset:offset+2]
+        def receiver_at(time):
+            return [receiver_start[k]+(endpoint[k]-receiver_start[k])*time/seconds for k in (0, 1)]
+        shot = event['event_type'] == 'shot'
+        goal = [52.5 if event['team'] == TEAMS[0] else -52.5, 0]
+        path = math.dist(origin, goal)+math.dist(goal, endpoint) if shot else math.dist(origin, endpoint)
+        speed = 25.0 if shot else max(18+(seed ^ int(event['id'][1:])) % 6, path/(seconds-.1))
+        if speed > 25 or path > 25*seconds:
+            raise ValueError(f'{event["id"]}: {path:.6f} m cannot fit {seconds} s flight budget')
+        segments = []
+        start = 0.0
+        source = origin
+        if shot:
+            end = math.dist(origin, goal)/speed
+            segments.append(dict(phase='shot', start=start, end=end, origin=source, target=goal))
+            start, source = end, goal
+        if not shot and event['event_type']=='pass' and event['player']==nxt['player'] and math.dist(origin, endpoint)>1e-10:
+            # A repeated actor can knock the ball into their own run. The
+            # flight ends at the one-second receiving point; the ball waits
+            # there explicitly until the player arrives, then stays attached.
+            touch = min(1.0, seconds)
+            target = receiver_at(touch)
+            end = math.dist(source, target)/speed
+            segments.append(dict(phase='pass', start=0.0, end=end, origin=source, target=target))
+            segments.append(dict(phase='waiting', start=end, end=touch, origin=target, target=target))
+            start, source = touch, target
+        elif math.dist(source, receiver_at(start)) > 1e-10:
+            low, high = start, seconds
+            for _ in range(48):
+                middle = (low+high)/2
+                if math.dist(source, receiver_at(middle)) > speed*(middle-start):
+                    low = middle
+                else:
+                    high = middle
+            end = high
+            target = receiver_at(end)
+            segments.append(dict(phase='rebound' if shot else 'pass' if event['event_type']=='pass' else 'transfer',
+                                 start=start, end=end, origin=source, target=target))
+            start, source = end, target
+        # HOLD means possession at the moving receiver, not continued flight.
+        # The carrier follows exactly the displayed player chord.
+        segments.append(dict(phase='held', start=start, end=seconds, origin=source, target=endpoint))
+        plans[event['id']] = dict(seconds=seconds, receiver=nxt['player'], segments=segments)
+    return dict(label=POSITION_LABEL, seed=seed, plans=plans)
 
 
 def stamp(seconds):
@@ -479,9 +600,12 @@ def main():
     root = Path(__file__).resolve().parent/'data'
     root.mkdir(exist_ok=True)
     bundle = build(args.seed)
+    flights = serialized(ball_flights(bundle['events'], args.seed))
     (root/'match.json').write_text(serialized(bundle), encoding='utf-8')
     (root/'match.js').write_text('window.MATCH = '+serialized(bundle).rstrip()+';\n', encoding='utf-8')
     (root/'events.jsonl').write_text(''.join(serialized(e) for e in bundle['events']), encoding='utf-8')
+    (root/'ball-flights.json').write_text(flights, encoding='utf-8')
+    (root/'ball-flights.js').write_text('window.BALL_FLIGHTS = '+flights.rstrip()+';\n', encoding='utf-8')
     print(f'{LABEL}: {len(bundle["events"])} events; {bundle["metrics"]["pass_count"]} passes; {bundle["metrics"]["shot_count"]} shots; {len(bundle["insights"])} verified insights.')
 
 if __name__ == '__main__':

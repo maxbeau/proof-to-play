@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-global.window=global;require('../data/match.js');require('../engine.js');require('../pitch-motion.js');
+global.window=global;require('../data/match.js');require('../data/ball-flights.js');require('../engine.js');require('../pitch-motion.js');
 const M=global.MATCH,E=global.MatchEngine;let count=0;
 function test(name,fn){fn();count++;console.log('PASS '+name);}
 test('browser metrics equal Python output in all evidence windows',()=>{assert.deepEqual(E.metrics(M.events,0,5400,M.teams),M.metrics);M.insights.forEach(c=>{assert(E.validate(c,M.events,M.teams));assert.deepEqual(E.metrics(M.events,c.window_start,c.window_end,M.teams),c.metric_value);});});
@@ -16,7 +16,7 @@ let now=1000,tick=null,intervalMs=null;
 Object.defineProperty(global,'performance',{value:{now:()=>now},configurable:true});
 global.setInterval=(fn,ms)=>{tick=fn;intervalMs=ms;return 1;};global.clearInterval=()=>{tick=null;};
 const uiMotion=PitchMotion.createMotion();
-let pitchCursor=null,pitchResizes=0;global.PitchView={update:(seconds,event,claim,events,playback)=>{pitchCursor={seconds,event,claim,playback};uiMotion.update(seconds,event.positions,events.find(e=>e.time===seconds+5)?.positions,playback.playing,playback.started,now,playback.snap);},resize:()=>{pitchResizes++;}};
+let pitchCursor=null,pitchResizes=0;global.PitchView={update:(seconds,event,claim,events,playback)=>{pitchCursor={seconds,event,claim,playback};uiMotion.update(seconds,event.positions,events.find(e=>e.time===seconds+5)?.positions,playback.playing,playback.started,now,playback.snap,BALL_FLIGHTS.plans[event.id]);},resize:()=>{pitchResizes++;}};
 global.document={getElementById:id=>els[id],createElement:tag=>new Element(tag),querySelectorAll:q=>q==='[data-view]'?nav:['live','evidence','scenario','publish','pitch'].map(id=>{els[id].id=id;return els[id];})};
 vm.runInThisContext(fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8'));
 const text=e=>e.textContent+' '+e.children.map(text).join(' ');
@@ -46,12 +46,42 @@ test('actual Play, Pause, Step and Jump handlers drive the motion clock',()=>{
  window.setMatchCursor(5);now+=250;
  els.play.onclick();assert.equal(intervalMs,250);assert.equal(pitchCursor.playback.playing,true);
  const a=M.events[0].positions,b=M.events[1].positions;
- now+=125;assert.deepEqual(uiMotion.at(now),PitchMotion.interpolate(a,b,.5));
+ now+=125;assert.deepEqual(uiMotion.at(now).slice(2),PitchMotion.interpolate(a,b,.5).slice(2));
+ assert.deepEqual(uiMotion.at(now).slice(0,2),PitchMotion.ballAt(BALL_FLIGHTS.plans[M.events[0].id],2.5));
  now+=125;tick();assert.equal(pitchCursor.seconds,10);assert.deepEqual(uiMotion.at(now),b);
  now+=125;els.play.onclick();assert.deepEqual(uiMotion.at(now),b);assert.equal(tick,null);
  els.step.onclick();assert.deepEqual(uiMotion.at(now),b);now+=250;assert.deepEqual(uiMotion.at(now),M.events[2].positions);
  const before=uiMotion.at(now);els.jumps.children[0].onclick();assert.deepEqual(uiMotion.at(now),before);now+=250;assert.deepEqual(uiMotion.at(now),pitchCursor.event.positions);
  window.setMatchCursor(5395);now+=250;els.play.onclick();now+=250;tick();assert.equal(pitchCursor.seconds,5400);assert.equal(tick,null);assert.deepEqual(uiMotion.at(now),M.events.at(-1).positions);
  els.play.onclick();assert.equal(pitchCursor.seconds,5);assert.equal(pitchCursor.playback.playing,true);els.play.onclick();
+});
+test('actual ball flight legs run at 12–25 m/s, intercept, hold and join without teleport',()=>{
+ const distance=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+ const m=PitchMotion.createMotion();
+ for(let i=0;i<M.events.length-1;i++){
+  const a=M.events[i],b=M.events[i+1],plan=BALL_FLIGHTS.plans[a.id],epoch=i*250;
+  m.update(a.time,a.positions,b.positions,true,epoch,epoch,false,plan);
+  const pose=t=>m.at(epoch+t/plan.seconds*PitchMotion.SAMPLE_MS);
+  assert.deepEqual(pose(0),a.positions);assert.deepEqual(pose(5),b.positions);
+  for(const leg of plan.segments){
+   const duration=leg.end-leg.start;
+   assert(distance(pose(leg.start),leg.origin)<1e-8);
+   assert(distance(pose(leg.end),leg.target)<1e-8);
+   if(leg.phase==='held'){
+    const k=2+2*M.position_players.indexOf(plan.receiver),t=(leg.start+leg.end)/2;
+    assert(distance(pose(t),pose(t).slice(k,k+2))<1e-8);
+   }else if(leg.phase==='waiting'){
+    assert.deepEqual(leg.origin,leg.target);
+   }else{
+    const speed=distance(pose(leg.start+duration*.25),pose(leg.start+duration*.75))/(duration*.5);
+    assert(speed>=12-1e-8 && speed<=25+1e-8,`${a.id}: ${speed}`);
+   }
+  }
+ }
+ // This short pass arrives after one match second and really stops flying.
+ const short={seconds:5,segments:[{start:0,end:1,origin:[0,0],target:[20,0],phase:'pass'},
+  {start:1,end:5,origin:[20,0],target:[20,0],phase:'held'}]};
+ m.update(0,[0,0],[20,0],true,0,0,false,short);
+ assert.deepEqual(m.at(25),[10,0]);assert.deepEqual(m.at(50),[20,0]);assert.deepEqual(m.at(125),[20,0]);
 });
 console.log(count+' browser-engine/UI tests passed; 0 failed (DOM harness, not a real browser).');

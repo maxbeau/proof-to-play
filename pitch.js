@@ -156,7 +156,7 @@ function update(seconds, event, claim, events, playback = {}) {
   if (!event?.positions) return;
   const next = events.find(row => row.time === seconds + 5);
   const now = performance.now();
-  motion.update(seconds, event.positions, next?.positions, Boolean(playback.playing), playback.started ?? now, now, playback.snap);
+  motion.update(seconds, event.positions, next?.positions, Boolean(playback.playing), playback.started ?? now, now, playback.snap, window.BALL_FLIGHTS?.plans[event.id]);
   pitchTimeline.value = seconds;
   pitchClock.textContent = `${clock(seconds)} / 90:00 · Sample ${Math.floor(seconds / 5)}`;
   showHighlight(claim, events);

@@ -62,46 +62,43 @@ Fixed default seed: **20261024**. The generator uses a dedicated random.Random i
 - state: cumulative fictional score, possession_team, elapsed_seconds; and a synthetic label.
 - positions: 46-number flat array per sample: ball `[x,y]`, followed by the 22 players' `[x,y]` pairs in `position_players` order, all in metres and rounded to 0.1. Each position is labelled **SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations**.
 
-The schematic formations use fixed formation anchors in roster order (goalkeeper, four defenders, midfielders, forwards). Aster Quills attacks toward +x in a 4-4-2: `(-48.5,0)`; defenders `(-34,-23), (-35,-8), (-35,8), (-34,23)`; midfielders `(-16,-23), (-15,-8), (-15,8), (-16,23)`; forwards `(5,-10), (18,10)`. Mica Lanterns attacks toward −x in a 4-3-3: `(48.5,0)`; defenders `(34,-23), (35,-8), (35,8), (34,23)`; midfielders `(16,-18), (15,0), (16,18)`; forwards `(-5,-18), (-5,0), (-5,18)`. Anchors are formation references, not measured player locations.
+The schematic formations start from formation references in roster order (goalkeeper, four defenders, midfielders, forwards). Aster Quills attacks toward +x in a 4-4-2: `(-48.5,0)`; defenders `(-34,-23), (-35,-8), (-35,8), (-34,23)`; midfielders `(-16,-23), (-15,-8), (-15,8), (-16,23)`; forwards `(5,-10), (18,10)`. Mica Lanterns attacks toward −x in a 4-3-3: `(48.5,0)`; defenders `(34,-23), (35,-8), (35,8), (34,23)`; midfielders `(16,-18), (15,0), (16,18)`; forwards `(-5,-18), (-5,0), (-5,18)`. Anchors are formation references, not measured player locations.
 
-### Position steering and role attributes
+### Synthetic/schematic ball flight
 
-Positions are **synthetic/schematic, not tracked data**. The generator ports the elementary YUKA-style steering maths directly into Python's standard library; it does not import YUKA, download assets, or add a browser dependency or build step. These are deliberately modest schematic speeds, not calibrated athletic attributes.
+All positions remain **SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations**. Events, actors, timestamps, outcomes, metrics, evidence objects and the evidence gate stay unchanged. The ball is exactly on its event actor at every stored sample. There is one player integration pass, with no independent frozen ball guide or post-hoc ball-step cap.
 
-| Formation role | maxSpeed (m/s) | maxForce / acceleration (m/s²) | Response (s) | Fatigue factor | Shape-shift scale | Roam radius (m) |
+Spatial flight data lives separately in `data/ball-flights.json` and its classic-script equivalent `data/ball-flights.js`; it is not inserted into event/evidence objects. Each interval stores its duration, next observed actor, and timed segments with explicit origin, target, start, end and phase. Pass/transfer legs use seeded 18–23 m/s speeds, increasing only when the actual distance requires it, never beyond 25 m/s. Shots and goal-area returns use 25 m/s. An impossible path raises an error before generated artifacts are written.
+
+`pitch-motion.js` maps the 250 ms playback interval to five match seconds and evaluates these segment durations. The ball intercepts the next actor's actual interpolated player path, then enters **held** possession and follows that same player for the remainder. It does not continue a five-second flight chord. A repeated-actor pass is an explicit short knock into that player's run: it flies to the one-second receiving point, waits there, and attaches when the player arrives. Waiting segments have identical endpoints and are tested separately from flight. These are schematic next-touch paths, not new event claims or inferred successful passes.
+
+The old speed test could not measure this representation: a 20 m pass flying for 1 s and then held for 4 s is **20 m/s in flight**, although stored endpoint distance divided by 5 s gives 4 m/s. Its replacement measures every actual flight leg's distance/duration at the unchanged **12–25 m/s** limit, checks joins, deadlines and receiver attachment, and requires a flight for moving pass observations. The JS harness independently measures motion returned by the real animation module, including a 20 m / 1 s flight followed by a hold.
+
+### Shot and rebound rule
+
+Every shot travels from its actor to the attacking goal centre, then returns continuously to the next actor's interception point. The original shot-plus-goal-to-next-actor **125 m / 5 s** acceptance test is retained unchanged. There is no teleport, time reset, goal omission or speed exception. The return is a schematic rebound/save/goal-area return; it is not an additional football event or a claim about a real restart.
+
+Before player integration, the offline generator plans spatial arrival regions for the unchanged shooter and next actor. Players begin converging up to 50 seconds before the touch, using the same velocity/acceleration-limited steering and collision constraints as their runs; the commitment releases over 15 seconds afterward. Role-zone minimum distances allocate the travel budget, reserving steering/rounding headroom. This also handles a next-touch goalkeeper in their own goal area: the shooter must be sufficiently close to the attacking goal to leave time for the long return. No player position is moved after sampling to satisfy the ball test.
+
+### Synthetic/schematic movement
+
+Movement budgets are simulation design targets, not measured athletic performance. Distance uses all 1,079 stored intervals (5,395 seconds). Each five-second sample integrates 50 steps of 0.1 seconds with persistent velocity, acceleration-limited Seek/Arrive steering, individual seeded attributes, debounced tactical assignments and the existing fatigue period.
+
+| Role | Mean target (m/s) | Distance target (km/player) | Base maxSpeed (m/s) | Acceleration (m/s²) | Response (s) | Run cycle (s) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Goalkeeper | 0.80 | 0.45 | 3.8 | 0.92 | 0.12 | 1.8 |
-| Defender | 1.35 | 0.65 | 3.0 | 0.78 | 0.38 | 3.6 |
-| Midfielder | 2.10 | 0.95 | 2.2 | 0.68 | 0.72 | 5.8 |
-| Winger | 3.00 | 1.40 | 1.5 | 0.60 | 1.05 | 9.5 |
-| Forward | 2.70 | 1.20 | 1.7 | 0.64 | 0.95 | 7.0 |
+| Goalkeeper | 0.7–1.0 | 3.78–5.40 | 4.0 | 2.0 | 0.85 | 47 |
+| Defender | 1.6–1.9 | 8.63–10.25 | 7.2 | 3.2 | 0.75 | 49 |
+| Midfielder | 1.9–2.2 | 10.25–11.87 | 8.3 | 3.8 | 0.65 | 58 |
+| Forward | 1.8–2.2 | 9.71–11.87 | 9.0 | 4.2 | 0.55 | 66.5 |
+| Winger | 1.8–2.2 | 9.71–11.87 | 9.5 | 4.8 | 0.45 | 65 |
 
-Roster order derives roles from the formations: 4-4-2 has two wide midfielders labelled wingers; 4-3-3 has two wide forwards labelled wingers. Every attribute receives independent seeded ±6% variation. Each player also has seeded steering weights (±10%), a different oscillation phase and period, and persistent velocity. The separate steering RNG leaves all event and frozen ball-guide random draws untouched. Attributes are auditable through player_attributes(seed) in pipeline.py; they do not add fields to events or evidence.
+Outfield routes use sustained advances/recoveries with ten-second semicircle turnarounds. Complete routes fit within each role zone, instead of clipping targets at a wall and reversing there. Independent phases, periods, clockwise/counterclockwise choices and individually warped lateral-arc timing spread headings even during long runs. Opposing players no longer share an imposed run clock. Goalkeepers retain their smaller curved patrol. The wide defensive screen stays outside ±16 m laterally, inside the unchanged legal role zones, so simultaneous inward wing turns cannot collapse team width below 30 m. Run periods are calibrated to retain the improved role distance budgets after removing artificial backtracking.
 
-Every five-second sample contains **50 internal 0.1-second substeps**. Seek/Arrive computes desired velocity toward an individual target, decelerating with distance inside the braking radius. Steering acceleration is (desired_velocity - current_velocity) / response, clamped to that player's maxForce (unit mass). Velocity integrates acceleration, is limited by that player's maxSpeed, and then integrates position. Target relaxation takes twice the player's response time. Speeds arise from distance, acceleration and individual attributes; there is no common player step cap. The internal paths curve as persistent velocity turns; the unchanged browser still interpolates the stored five-second endpoints.
+Territory follows the displayed actor at debounced tactical changes, with persistent velocity, a 1 m/s limit and gentle acceleration. It no longer jolts every player's route centre toward a newly selected actor every five seconds. Formation movement and individual runs therefore continue smoothly through observation changes.
 
-The behaviour layer combines:
+Collision handling measures the **minimum separation over the entire linear replay chord**. It allows safe crossings that the old fixed start-normal planes incorrectly rejected. Unsafe paths slide along a tangent separating plane feasible at the starting sample. Both sides are checked against available room in each player’s lane; a wall-blocked side is rejected, and the correction is shared according to available room. Corrections never divide by a tiny closest-approach fraction. Local repulsion and removal of closing normal velocity remain. The acceptance floor stays **1.50 m**; formation RMS spread >16 m, length >35 m, width >30 m, bounds, role zones and player speed caps remain unchanged.
 
-- **OffsetPursuit / formation anchors:** individual anchors follow slow team-shape movement, with defenders shifting less than attackers. Independent role-sized movement cycles avoid synchronized headings.
-- **Pursuit:** only the nearest defending outfield player (two in the relevant pressing phase) predicts the ball 1.5 seconds ahead using its previously observed velocity. Assignments hold through a tactical run; they are nearest at assignment time, not reselected every sample.
-- **Interpose:** two different markers aim between their assigned opponent and their own goal (30% toward goal), blended with their formation anchor.
-- **Space runs and support:** attacking wingers/forwards and two midfield supporters choose among local candidates using nearest-opponent clearance plus distance away from the ball. Supporters use smaller candidate offsets; this is a simple space proxy, not measured pitch control. Other players hold their zones.
-- **Wander:** low-weight coherent seeded drift gives each off-ball player an independent idle heading.
-- **Separation / social repulsion:** symmetric repulsion applies to both teams within 4 m, strengthening inside 2 m. A local 1.65 m swept hard-disc contact safeguard prevents penetration after integration and along the straight replay segment from the preceding sample (at least 1.50 m after coordinate rounding). This constraint is distinct from the acceleration-limited steering force.
-
-Goalkeepers stay within 3 m longitudinally and 6 m laterally of their own goal anchor. Other roles also have bounded formation zones, preventing ball-chasing collapse. Defender zones are narrower than midfield/attacking zones. All coordinates remain inside the 105 × 68 m pitch and round to 0.1 m.
-
-Independent event teams are not realistic continuous possession runs. The position-only tactical possession state requires three consecutive matching team observations and at least 30 seconds since assignment before a handover. Assignments otherwise change only at phase boundaries. This debouncing does **not** modify event possession or evidence. Pressing (25–30 minutes) increases anchor/pursuit weights and permits a second presser for the team with more scripted pressure events; flank play (50–55) biases winger steering toward the scripted dominant flank; fatigue (75–80) scales individual speed, acceleration and roaming by each player's fatigue factor. No phase applies one identical target jump to everyone.
-
-The ball's previous continuity fix is **preserved exactly**, including its independent random draw sequence and frozen schematic destination-guide paths in _ball_continuity_samples. Those reference paths are not rendered players and do not drive the new player steering. The ball still moves from its previous position toward a held pass/shot/actor destination, easing to 40% of remaining distance with an 8 m/sample cap and settling within 1 m. Ball coordinates are byte-identical to the preceding fix across all three tested seeds. A reference recipient/actor may differ from the displayed steering player's current location: these are schematic continuous trips, not reconstructed touches or physical ball possession.
-
-During Play, requestAnimationFrame interpolates every player and ball coordinate from the shared current sample to the next over **250 ms**, using the same playback epoch as Live. Repainting controls does not restart motion. Pause shows the exact current sample; Step/Jump/slider seeks glide from the displayed pose for 250 ms, then settle exactly on the selected sample (including rewinds). These short seek transitions are the only paused-state exception. At the end of the match the final sample holds. The ball has an enlarged white emissive body and dark outline for contrast; its simulated x/y position is unchanged.
-
-Movement acceptance checks run on seeds 20261024, 20261025 and 42. Speed means use five-second endpoint displacement / 5 (not internal path length). Ordered means must satisfy goalkeeper < defender < midfielder < forward < winger, with **at least 0.04 m/s between adjacent roles**, and each role must have nonidentical player means. Heading checks exclude steps below 0.2 m as quantization jitter: across eight 45° bins, no timestamp may put more than **75%** of moving players in one bin, the mean dominant share must be below **45%**, and mean circular spread (one minus mean unit-heading magnitude) must exceed **0.45**. The captured old model fails the speed and heading thresholds.
-
-Separation must remain **≥1.50 m** for every pair at every stored sample and throughout linear interpolation between consecutive samples (analytical closest-approach check). Arbitrary long Jump/seek transitions can cross other tokens and still need a browser check. Each team's RMS spread must exceed **16 m**, longitudinal extent **35 m**, and lateral extent **30 m**; centroids remain near formation centers and mean centroid-to-ball distance exceeds **18 m**. Individual zone checks include goalkeepers. Bounds and step limits follow individual maxSpeed rather than the obsolete shared cap. Vehicle tests check acceleration, inertia through turns and arrival settling. Reversal checks permit fewer than **10%** of consecutive significant steps to turn more than 120° (the former 5% ceiling assumed shared slow drift); longitudinal coverage remains >10 m outfield and >4 m for goalkeepers. Hard contact correction is a separate positional constraint. Tests also check stable assignments, nearest pressers, ball hashes, three-seed non-position bundle hashes, and byte-identical full artifact regeneration.
-
-The JS harness checks interpolation endpoints/midpoints, repeated updates, seeks, pause, playback boundaries and actual app handlers. It does not verify actual visual smoothness or visibility in a real browser.
+Play uses the shared Live playback epoch. Pause, Step, Jump, sliders, end-of-match and manual seek behavior remain covered by the UI harness. The harness is **not a real-browser visual check**: ball flight smoothness, shot rebounds, continuity at joins/seeks, token overlap and heading variety still need a visual browser review.
 
 The Pitch view builds its field, lines, goal frames, players and ball from Three.js primitives. It uses the local `vendor/three.module.js` and `vendor/OrbitControls.js` files only; Three.js v0.160.0 is MIT licensed and vendored under `vendor/`. There are no downloaded models, textures, remote scripts or other external assets. Its ES modules require HTTP(S) in browsers that block modules under `file://`; if module loading fails, the Pitch view shows the local-server command while the other views remain available.
 
@@ -112,6 +109,7 @@ Output files:
 - data/events.jsonl: raw event stream.
 - data/match.json: events, aggregate metrics, evidence, bilingual templates and the broken test fixture.
 - data/match.js: the same bundle as a local classic script, enabling direct file opening.
+- data/ball-flights.json and data/ball-flights.js: spatial-only, timed ball segments for replay.
 
 JSON keys are sorted, UTF-8 output is fixed, and no wall-clock timestamp enters the pipeline. generation_time is an explicitly labelled **simulation clock**, anchored at 2026-01-01T00:00:00Z plus window_end, not the time the program was actually run. This permits byte-identical full regeneration on the supported runtime. Alternative seed: python3 pipeline.py --seed INTEGER; regenerate the default before running default artifact acceptance checks. Cross-version Python random algorithm compatibility is not promised.
 
@@ -167,31 +165,40 @@ Azure and Microsoft Foundry are **optional future ideas / not used**. No adapter
 
 The suite covers seed byte reproducibility, alternate seed behavior, stored-event recomputation, artifact parity, magnitude bounds, three turning points, provenance in every template, malformed claims, score snapshots, local assets, Python/JavaScript agreement, frozen scenario stability, and approval/rejection/rewind behavior. A grep extraction verifies that every generated entity field belongs to the closed fictional allowlist. This is a positive entity-inventory check, not a claim to maintain an exhaustive worldwide real-person-name blacklist; no external name dataset is used.
 
-Verification: python3 pipeline.py completed successfully; python3 tests/run.py reported **37 passed, 0 failed, 0 skipped** (25 Python tests and 12 JavaScript engine/UI tests). The three-seed checks include exact preservation of ball coordinates and non-position bundle hashes. Full default regeneration remains byte-identical. The runner computes its total from actual Python and JavaScript results; it has no hardcoded test count. The pre-change measurements and ball hashes are retained in tests/movement_baseline.json; tests/movement_metrics.py defines the same measurements for old and new output.
+Verification: **`python3 pipeline.py` succeeded. `python3 tests/run.py` reported 41 passed, 0 failed, 0 skipped**: 28 Python checks and 13 JavaScript engine/UI checks. The initial working tree was independently verified at 36 passed / 4 failed. One JS flight/hold/continuity check was added. `tests/run.py` still derives totals from discovery and now records the exact tested bundles' movement/flight statistics in `tests/unified_movement_after.json` after a successful run.
 
-Measured default-seed movement (speed = endpoint displacement / 5 seconds):
+| Previously failing requirement | Before this repair | Verified after repair |
+| --- | --- | --- |
+| Pass/shot flight speed | 2,141 stored-chord intervals outside 12–25 m/s | 0 invalid active flight legs; 2509 pass/shot flight legs measured, 18.000000–25.000000 m/s |
+| Shot → goal → next actor | 40 paths over 125 m; maximum 202.568060 m | 0 of 81 paths over 125 m; maximum 123.909923 m (seed 42, E0407) |
+| Dominant 45-degree heading bin | Default maximum 54.545455% | Maximum 50.000000% across the three seeds |
+| Turns >120 degrees | First failing player AQ-02: 141/1,072 = 13.152985%; default worst 255/1,078 = 23.654917% | AQ-02: 48/1078 = 4.452690%; worst across all seeds 75/1076 = 6.970260% (AQ-02, seed 42) |
 
-| Role | Before mean speed (m/s) | After mean speed (m/s) |
-| --- | ---: | ---: |
-| Goalkeeper | 0.068 | 0.111 |
-| Defender | 0.136 | 0.262 |
-| Midfielder | 0.136 | 0.437 |
-| Forward | 0.136 | 0.536 |
-| Winger | 0.136 | 0.723 |
+The flight test changes the **measurement**, not the 12–25 m/s threshold; the 20 m / 1 s example and actual renderer checks are documented above. Shot budget, heading thresholds (maximum ≤50%, mean <40%, circular spread >0.45), reversal ceiling (<10%) and all other acceptance limits remain unchanged.
 
-| Measurement | Before | After |
-| --- | ---: | ---: |
-| Mean dominant heading-bin share | 0.864 | 0.303 |
-| Maximum dominant heading-bin share | 1.000 | 0.545 |
-| Mean circular spread | 0.026 | 0.786 |
-| Minimum sample separation (m) | 2.102 | 1.655 |
-| Minimum interpolated separation (m) | 2.102 | 1.597 |
-| Minimum team RMS spread (m) | 19.832 | 18.540 |
-| Mean centroid-to-ball distance (m) | 29.765 | 30.089 |
-| Ball mean step (m/5s) | 4.054 | 4.054 |
-| Ball maximum step (m/5s) | 7.951 | 7.951 |
+| Seed | Mean dominant bin | Maximum dominant bin | Circular spread | Minimum replay separation (m) |
+| --- | ---: | ---: | ---: | ---: |
+| 20261024 | 28.867719% | 50.000000% | 0.813340 | 1.753387 |
+| 20261025 | 28.899815% | 50.000000% | 0.818786 | 1.766939 |
+| 42 | 28.481960% | 50.000000% | 0.814732 | 1.749286 |
 
-These figures describe schematic trajectories, not measured athletic performance. They cover 1,079 consecutive intervals and all 22 players. Normal consecutive-sample replay separation is tested analytically; arbitrary Jump/seek transitions and perceived movement still need real-browser inspection.
+All three original non-position SHA-256 checks pass, including events, metrics, evidence and templates. The evidence gate and event actors/times/outcomes are unchanged. All five generated artifacts, including flight sidecars, regenerate byte-identically. Ball-to-actor and ball-to-nearest-player distances stay **0 m** at stored samples. Separation stays ≥1.50 m; formation spread/width/length, role zones, bounds, player speed caps and sustained runs all pass. No dependencies, assets, CDN, npm or build step were added.
+
+### Retained movement gains (default seed)
+
+These are endpoint measurements of synthetic positions, not real tracking. “Before” is the partial fix at the start of this task, not the much earlier low-motion baseline. Role distance levels remain close; exact totals change with the repaired paths.
+
+| Role | Before mean m/s | After mean m/s | Before km/player | After km/player |
+| --- | ---: | ---: | ---: | ---: |
+| Goalkeeper | 0.879806 | 0.855999 | 4.746553 | 4.618114 |
+| Defender | 1.819217 | 1.804444 | 9.814677 | 9.734974 |
+| Midfielder | 2.121397 | 2.133370 | 11.444936 | 11.509532 |
+| Forward | 1.926987 | 1.920192 | 10.396097 | 10.359437 |
+| Winger | 2.107471 | 2.110941 | 11.369807 | 11.388525 |
+
+Default outfield longitudinal ranges remain **50–100 m**; both goalkeeper ranges remain **13.5 m**. Full per-player ranges, distances, reversal counts and all 81 shot-path lengths are retained in the measurement report. `tests/unified_movement_before.json` remains the earlier low-motion historical fixture; `partial_repair_baseline` in the updated after-report preserves the baseline for this task.
+
+No real-browser visual check was performed. Still check **ball flight smoothness, goal/rebound behavior, no visible teleport at phase/sample joins or seeks, player overlap, and heading variety** in the intended browser.
 
 The UI interaction tests execute actual app.js handlers in a minimal DOM harness. **No real browser or screenshot verification has been performed in this environment.** Layout, keyboard and direct-file behavior should be checked manually in the intended presentation browser. Native controls, visible focus rings, high-contrast captions, textual evidence and English/Chinese templates are provided; formal accessibility or screen-reader certification is not claimed.
 
