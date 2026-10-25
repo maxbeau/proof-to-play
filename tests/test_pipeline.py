@@ -146,7 +146,58 @@ class Acceptance(unittest.TestCase):
                 previous = row
 
     def test_seed_byte_identical(self):
-        self.assertEqual(p.serialized(self.bundle), p.serialized(p.build()))
+        trace = []
+        self.assertEqual(p.serialized(self.bundle), p.serialized(p.build(diagnostics=trace)))
+        self.assertEqual(p.serialized(p.player_modes(self.traces[p.SEED])), p.serialized(p.player_modes(trace)))
+
+    def test_player_modes_cover_every_generated_sample_and_player(self):
+        known = {'holder', 'presser', 'runner', 'supporter', 'marker'}
+        for seed, trace in self.traces.items():
+            data = p.player_modes(trace, seed)
+            self.assertEqual(data['position_players'], p.POSITION_PLAYERS)
+            self.assertEqual(len(data['samples']), 1080)
+            self.assertEqual([row['time'] for row in data['samples']], list(range(5, 5401, 5)))
+            for row, diagnostic in zip(data['samples'], trace):
+                self.assertEqual(len(row['modes']), 22)
+                self.assertTrue(set(row['modes']) <= known)
+                self.assertEqual(row['modes'], diagnostic['modes'])
+            self.assertEqual({mode for row in data['samples'] for mode in row['modes']}, known)
+
+    def test_player_modes_attributes_and_initial_positions_match_generator(self):
+        for seed, trace in self.traces.items():
+            data = p.player_modes(trace, seed)
+            self.assertEqual(data['seed'], seed)
+            self.assertEqual(data['initial'], {'time': 0, 'positions': [list(xy) for team in p.TEAMS for xy in p.FORMATIONS[team]]})
+            self.assertEqual(len(data['players']), 22)
+            for i, (player, attrs) in enumerate(zip(data['players'], p.player_attributes(seed))):
+                self.assertEqual(player['id'], p.POSITION_PLAYERS[i])
+                self.assertEqual(player['team'], p.TEAMS[i//11])
+                for key in ('role', 'weights', 'maxSpeed', 'maxForce', 'response', 'stamina'):
+                    self.assertEqual(player[key], attrs[key])
+
+    def test_player_modes_local_files_and_classic_script_parity(self):
+        modes = p.serialized(p.player_modes(self.traces[p.SEED]))
+        self.assertEqual((ROOT/'data/player-modes.json').read_text(), modes)
+        self.assertEqual((ROOT/'data/player-modes.js').read_text(), 'window.PLAYER_MODES = '+modes.rstrip()+';\n')
+        html = (ROOT/'index.html').read_text()
+        self.assertIn('src="data/player-modes.js"', html)
+        self.assertIn('src="pitch-identification.js"', html)
+        self.assertLess(html.index('src="data/player-modes.js"'), html.index('src="pitch.js"'))
+        helper = (ROOT/'pitch-identification.js').read_text()
+        for external in ('fetch(', 'XMLHttpRequest', 'innerHTML'):
+            self.assertNotIn(external, helper)
+
+    def test_display_change_preserves_e172f6a_artifacts_byte_for_byte(self):
+        # Full files, including positions and ball flights, captured at e172f6a.
+        expected = {
+            'match.json': 'f7bb1e77d69119d87e360c0e696a8a17439388d0af40402e0d6155ec4379e042',
+            'match.js': '03a5faab76624e9ab6bd499bdf28d2c7fe7e16f850ff624ba31d3d4cd7dd4c2c',
+            'events.jsonl': '03d81a8d4d6ebfdb6ced2202662bf403334b87c26a29ddc934134c20bb617424',
+            'ball-flights.json': '656da64ea65d9a1c90adf26bd14440ec1bde5d4a9083ee5af0192579fa851701',
+            'ball-flights.js': '8dcf4a6e799a537469c9269bdab71c4d7630609c134369483998b2a9973f6988',
+        }
+        for name, digest in expected.items():
+            self.assertEqual(hashlib.sha256((ROOT/'data'/name).read_bytes()).hexdigest(), digest, name)
 
     def test_positions_bounds_and_player_speed_cap(self):
         for event in self.events:
@@ -268,7 +319,7 @@ class Acceptance(unittest.TestCase):
     def test_positions_change_with_seed_and_default_regeneration_is_identical(self):
         alternate = self.bundles[p.SEED+1]
         self.assertNotEqual([e['positions'] for e in self.events], [e['positions'] for e in alternate['events']])
-        files = ['match.json', 'match.js', 'events.jsonl', 'ball-flights.json', 'ball-flights.js']
+        files = ['match.json', 'match.js', 'events.jsonl', 'ball-flights.json', 'ball-flights.js', 'player-modes.json', 'player-modes.js']
         expected = {name: (ROOT/'data'/name).read_bytes() for name in files}
         subprocess.run([sys.executable, str(ROOT/'pipeline.py')], cwd=ROOT, check=True, capture_output=True, text=True)
         for name in files:

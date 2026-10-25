@@ -64,6 +64,41 @@ Fixed default seed: **20261024**. The generator uses a dedicated random.Random i
 
 The schematic formations start from formation references in roster order (goalkeeper, four defenders, midfielders, forwards). Aster Quills attacks toward +x in a 4-4-2: `(-48.5,0)`; defenders `(-34,-23), (-35,-8), (-35,8), (-34,23)`; midfielders `(-16,-23), (-15,-8), (-15,8), (-16,23)`; forwards `(5,-10), (18,10)`. Mica Lanterns attacks toward −x in a 4-3-3: `(48.5,0)`; defenders `(34,-23), (35,-8), (35,8), (34,23)`; midfielders `(16,-18), (15,0), (16,18)`; forwards `(-5,-18), (-5,0), (-5,18)`. Anchors are formation references, not measured player locations.
 
+### Pitch player identification
+
+In **Pitch**, click a player token's body or head to open **Player identification**. Click another token to switch players; click empty canvas space or **Close** to dismiss. Dragging, panning, scrolling and multi-touch gestures do not select players. Reset view retains the selection. The panel overlays the right side of the pitch on wide screens and appears below it on narrow screens; it uses the existing dark studio theme and system fonts.
+
+Identification follows the **shared five-second sample cursor** through Play/Pause, Step, Jump, either slider, rewind and end-of-match. It shows the fictional player ID, team, role, current generated mode, simulated speed, all six configured steering weights and the player's seeded role attributes. The timestamp and sample number refer to the stored sample, not the animation interpolating between samples. If the selected player, matching mode data or speed positions are unavailable, the panel removes all previous values and displays a timestamped unavailable message; it never presents the previous sample as current.
+
+**Modes and speeds are synthetic / simulated, not tracked data.** Speed is the Euclidean displacement of that player's stored positions divided by elapsed **match seconds**, using the interval ending at the cursor. For sample 1 (00:05), the starting position is the generator's actual formation at time zero, exported in the sidecar. Later samples use the previous stored sample; sample 1080 (90:00) uses 89:55–90:00. This five-second displacement estimate is not instantaneous velocity, integrated route length or a speed based on the accelerated 250 ms playback interval. Coordinates are rounded to 0.1 m, so displayed speed inherits that quantization.
+
+The always-visible mode legend uses the generator's **assign_behaviours** definitions:
+
+| Mode | Meaning in this generator |
+| --- | --- |
+| holder | Default assignment, including both goalkeepers: follows the role route. It does **not** identify the ball carrier. |
+| presser | One or two defending outfield players chosen nearest the previous sampled ball when assignments change; adds a pursuit term. |
+| runner | Attacking wingers and forwards assigned to role-shaped runs. |
+| supporter | The first two attacking midfielders in roster order assigned to support. |
+| marker | Up to two available defending back-line players assigned distinct nearby attacking runners; adds lateral marking. |
+
+Assignments persist until the generator's debounced possession/phase change. They are exported from the diagnostics of the same integration pass, not inferred from the event actor or guessed from the nearest token. All players follow their role-shaped route with feed-forward velocity and Seek/Arrive correction; holder, runner and supporter are tactical labels, not three separate steering implementations in e172f6a.
+
+| Steering weight | Meaning and actual use in e172f6a |
+| --- | --- |
+| anchor | Configured formation/route anchoring weight. **Stored but unused as a multiplier**; all players already receive the route's Seek/Arrive correction. |
+| pursuit | Multiplies the capped vector toward the previous sampled ball, only for a presser. Inactive for other modes. |
+| mark | Multiplies the capped lateral correction toward the assigned opponent, only for a marker. Inactive for other modes. |
+| space | Configured space-seeking weight, **stored but unused**; there is no separate space-seeking term in this model. |
+| wander | Configured wandering weight, **stored but unused**; variation comes from seeded role routes, not a wander-force term. |
+| separation | Multiplies local repulsion when neighbours on either team are within 4 m, with stronger response inside 2 m. The existing contact constraints also remain in effect. |
+
+The panel labels unused and mode-conditional weights explicitly. These are seeded configuration weights, not sampled force magnitudes or a claim that a neighbour is currently within range. Attributes are the actual per-player seeded values: **maxSpeed** is the base speed cap in m/s, **maxForce** the unit-mass acceleration cap in m/s², **response** the velocity response time in seconds, and **stamina** the multiplier on speed and force caps during the inclusive 75:00–80:00 fatigue phase. Display rounds weights/attributes to three decimals; the exported data retains full precision.
+
+**data/player-modes.json** and **data/player-modes.js** follow the existing ball-flight sidecar pattern. They include roster order, fictional team/role metadata, seeded weights/attributes, time-zero positions and **all 1,080 samples × 22 players (23,760 mode assignments)**. Rows have exact sample times and modes in position_players order. The classic script loads locally before the Pitch module without fetch, dependencies or external assets; the existing file:// Pitch fallback and other views remain available if ES modules cannot load. The UI rejects missing samples, unknown modes, mismatched seeds or mismatched roster order rather than reusing stale values.
+
+This separate file keeps mode diagnostics out of match.json/events.jsonl and all evidence objects, preserving the non-position hash checks. Both sidecar formats regenerate byte-identically for the default seed. Full-file SHA-256 tests also pin all five pre-existing generated artifacts to **e172f6a**, including positions and ball flights: this feature changes display/export only, not the simulation, steering, events, metrics or evidence gate.
+
 ### Synthetic/schematic ball flight
 
 All positions remain **SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations**. Events, actors, timestamps, outcomes, metrics, evidence objects and the evidence gate stay unchanged. The ball is exactly on its event actor at every stored sample. There is one player integration pass, with no independent frozen ball guide or post-hoc ball-step cap.
@@ -110,6 +145,7 @@ Output files:
 - data/match.json: events, aggregate metrics, evidence, bilingual templates and the broken test fixture.
 - data/match.js: the same bundle as a local classic script, enabling direct file opening.
 - data/ball-flights.json and data/ball-flights.js: spatial-only, timed ball segments for replay.
+- data/player-modes.json and data/player-modes.js: complete per-sample modes, seeded player attributes and initial positions for display-only identification.
 
 JSON keys are sorted, UTF-8 output is fixed, and no wall-clock timestamp enters the pipeline. generation_time is an explicitly labelled **simulation clock**, anchored at 2026-01-01T00:00:00Z plus window_end, not the time the program was actually run. This permits byte-identical full regeneration on the supported runtime. Alternative seed: python3 pipeline.py --seed INTEGER; regenerate the default before running default artifact acceptance checks. Cross-version Python random algorithm compatibility is not promised.
 
@@ -165,7 +201,7 @@ Azure and Microsoft Foundry are **optional future ideas / not used**. No adapter
 
 The suite covers seed byte reproducibility, alternate seed behavior, stored-event recomputation, artifact parity, magnitude bounds, three turning points, provenance in every template, malformed claims, score snapshots, local assets, Python/JavaScript agreement, frozen scenario stability, and approval/rejection/rewind behavior. A grep extraction verifies that every generated entity field belongs to the closed fictional allowlist. This is a positive entity-inventory check, not a claim to maintain an exhaustive worldwide real-person-name blacklist; no external name dataset is used.
 
-Verification: **`python3 pipeline.py` succeeded. `python3 tests/run.py` reported 41 passed, 0 failed, 0 skipped**: 28 Python checks and 13 JavaScript engine/UI checks. The initial working tree was independently verified at 36 passed / 4 failed. One JS flight/hold/continuity check was added. `tests/run.py` still derives totals from discovery and now records the exact tested bundles' movement/flight statistics in `tests/unified_movement_after.json` after a successful run.
+Verification: **python3 pipeline.py succeeded. python3 tests/run.py reported 51 passed, 0 failed, 0 skipped**: 32 Python checks and 19 JavaScript engine/UI checks. All 41 existing checks remain; identification adds four Python and six JavaScript checks. tests/run.py derives totals from discovery and records them in tests/unified_movement_after.json. The earlier movement-repair results below remain unchanged by this display-only feature.
 
 | Previously failing requirement | Before this repair | Verified after repair |
 | --- | --- | --- |
@@ -182,7 +218,7 @@ The flight test changes the **measurement**, not the 12–25 m/s threshold; the 
 | 20261025 | 28.899815% | 50.000000% | 0.818786 | 1.766939 |
 | 42 | 28.481960% | 50.000000% | 0.814732 | 1.749286 |
 
-All three original non-position SHA-256 checks pass, including events, metrics, evidence and templates. The evidence gate and event actors/times/outcomes are unchanged. All five generated artifacts, including flight sidecars, regenerate byte-identically. Ball-to-actor and ball-to-nearest-player distances stay **0 m** at stored samples. Separation stays ≥1.50 m; formation spread/width/length, role zones, bounds, player speed caps and sustained runs all pass. No dependencies, assets, CDN, npm or build step were added.
+All three original non-position SHA-256 checks pass, including events, metrics, evidence and templates. The evidence gate and event actors/times/outcomes are unchanged. All seven generated artifacts, including flight and player-mode sidecars, regenerate byte-identically. The five pre-existing artifacts are also byte-identical to e172f6a. Ball-to-actor and ball-to-nearest-player distances stay **0 m** at stored samples. Separation stays ≥1.50 m; formation spread/width/length, role zones, bounds, player speed caps and sustained runs all pass. No dependencies, assets, CDN, npm or build step were added.
 
 ### Retained movement gains (default seed)
 
@@ -200,6 +236,8 @@ Default outfield longitudinal ranges remain **50–100 m**; both goalkeeper rang
 
 No real-browser visual check was performed. Still check **ball flight smoothness, goal/rebound behavior, no visible teleport at phase/sample joins or seeks, player overlap, and heading variety** in the intended browser.
 
-The UI interaction tests execute actual app.js handlers in a minimal DOM harness. **No real browser or screenshot verification has been performed in this environment.** Layout, keyboard and direct-file behavior should be checked manually in the intended presentation browser. Native controls, visible focus rings, high-contrast captions, textual evidence and English/Chinese templates are provided; formal accessibility or screen-reader certification is not claimed.
+The UI interaction tests execute actual app.js handlers in a minimal DOM harness. The identification checks exercise the real pure JS helper for every sample/player, the real panel DOM renderer, mode transitions, speed calculations (including both endpoints), switching and Close, missing/mismatched data, stale-value clearing, and Play/Pause/Step/Jump/slider/rewind/end updates. Synthetic pointer events verify body/head ancestry, empty-space deselection and suppression of drag, pan, pinch, cancel and zoom gestures. A source wiring check confirms recursive player-only raycasting, fresh camera/scene transforms and update ordering; it does **not** execute WebGL or certify physical ray hits. The module-failure handler still exposes the local-server fallback while Live handlers work.
+
+**No real browser or screenshot verification has been performed in this environment.** Still check actual token and empty-space ray hits, panel readability/scrolling at desktop and narrow sizes, switching and Close during playback, and orbit/zoom/pan plus Reset view before and after selecting. Confirm evidence overlays and ball rendering remain visible and file:// still shows the Pitch fallback while the other views work. Layout, keyboard and direct-file behavior need manual review in the intended browser. Native controls, visible focus rings, high-contrast captions, textual evidence and English/Chinese templates are provided; formal accessibility or screen-reader certification is not claimed.
 
 Deliberately omitted: real data and footage, machine learning, cloud, audio, accounts, multiplayer, durable approvals, deployment and submission. The simplified event cadence, proxy possession, scripted changes and linear What-If rules are illustrative. This is not a real match, a calibrated tactical model or a prediction.

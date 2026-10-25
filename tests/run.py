@@ -1,4 +1,4 @@
-"""Run local acceptance checks, including steering; derive totals from discovery.
+"""Run local checks, including steering and identification; derive test totals.
 
 Node is only needed for JS verification. No fixed test total is maintained.
 """

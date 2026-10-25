@@ -484,6 +484,26 @@ def ball_flights(events, seed=SEED):
     return dict(label=POSITION_LABEL, seed=seed, plans=plans)
 
 
+def player_modes(diagnostics, seed=SEED):
+    """Display-only sidecar from the integration trace; never infer assignments.
+
+    Attributes use the same independent seeded function as position_samples.
+    Initial positions support a trailing speed estimate at the first sample.
+    Some stored weights are unused by this model; the UI labels that explicitly.
+    """
+    attributes = player_attributes(seed)
+    return {
+        'label': POSITION_LABEL, 'seed': seed,
+        'position_players': POSITION_PLAYERS,
+        'players': [dict(id=player, team=TEAMS[i//11],
+                         **{key: attributes[i][key] for key in
+                            ('role', 'weights', 'maxSpeed', 'maxForce', 'response', 'stamina')})
+                    for i, player in enumerate(POSITION_PLAYERS)],
+        'initial': {'time': 0, 'positions': [list(xy) for team in TEAMS for xy in FORMATIONS[team]]},
+        'samples': [{'time': row['time'], 'modes': row['modes'].copy()} for row in diagnostics],
+    }
+
+
 def stamp(seconds):
     return (datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=seconds)).isoformat().replace('+00:00', 'Z')
 
@@ -599,13 +619,17 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parent/'data'
     root.mkdir(exist_ok=True)
-    bundle = build(args.seed)
+    diagnostics = []
+    bundle = build(args.seed, diagnostics)
     flights = serialized(ball_flights(bundle['events'], args.seed))
+    modes = serialized(player_modes(diagnostics, args.seed))
     (root/'match.json').write_text(serialized(bundle), encoding='utf-8')
     (root/'match.js').write_text('window.MATCH = '+serialized(bundle).rstrip()+';\n', encoding='utf-8')
     (root/'events.jsonl').write_text(''.join(serialized(e) for e in bundle['events']), encoding='utf-8')
     (root/'ball-flights.json').write_text(flights, encoding='utf-8')
     (root/'ball-flights.js').write_text('window.BALL_FLIGHTS = '+flights.rstrip()+';\n', encoding='utf-8')
+    (root/'player-modes.json').write_text(modes, encoding='utf-8')
+    (root/'player-modes.js').write_text('window.PLAYER_MODES = '+modes.rstrip()+';\n', encoding='utf-8')
     print(f'{LABEL}: {len(bundle["events"])} events; {bundle["metrics"]["pass_count"]} passes; {bundle["metrics"]["shot_count"]} shots; {len(bundle["insights"])} verified insights.')
 
 if __name__ == '__main__':

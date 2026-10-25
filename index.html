@@ -91,17 +91,33 @@
       <div class="pitch-stage-heading"><div><p class="eyebrow">SCHEMATIC FIELD VIEW</p><p class="muted">Synthetic positions — schematic, not tracked data.</p></div><button id="pitch-reset">Reset view</button></div>
       <div class="pitch-legend"><span><i class="legend-dot quills" aria-hidden="true"></i>Aster Quills</span><span><i class="legend-dot lanterns" aria-hidden="true"></i>Mica Lanterns</span><span><i class="legend-dot ball-dot" aria-hidden="true"></i>Ball</span></div>
       <div id="pitch-fallback" class="pitch-fallback" role="status" hidden></div>
-      <canvas id="pitch-canvas" aria-label="Three dimensional synthetic pitch and schematic player positions"></canvas>
+      <div class="pitch-mode-legend" aria-label="Synthetic behaviour mode legend">
+        <p class="eyebrow">GENERATED MODES · CLICK A TOKEN TO IDENTIFY</p>
+        <dl>
+          <div><dt>holder</dt><dd>Keeps role route; not necessarily the ball carrier.</dd></div>
+          <div><dt>presser</dt><dd>Defending player pursuing the previous sampled ball.</dd></div>
+          <div><dt>runner</dt><dd>Attacking winger or forward on a role-shaped run.</dd></div>
+          <div><dt>supporter</dt><dd>Attacking midfielder supporting on the role route.</dd></div>
+          <div><dt>marker</dt><dd>Defender tracking an attacker laterally.</dd></div>
+        </dl>
+      </div>
+      <div class="pitch-viewport">
+        <canvas id="pitch-canvas" aria-label="Three dimensional synthetic pitch and schematic player positions. Click a player to identify."></canvas>
+        <aside id="pitch-identification" class="pitch-identification" aria-labelledby="pitch-identification-title" hidden>
+          <div class="panel-heading"><h3 id="pitch-identification-title">Player identification</h3><button id="pitch-identification-close" aria-label="Close player identification">Close</button></div>
+          <div id="pitch-identification-content"></div>
+        </aside>
+      </div>
       <div class="pitch-transport"><div class="panel-heading"><label class="eyebrow" for="pitch-timeline">Shared replay cursor</label><output id="pitch-clock" class="clock">00:05 / 90:00 · Sample 1</output></div><input id="pitch-timeline" type="range" min="5" max="5400" step="5" value="5" aria-label="Shared pitch replay time in seconds"><div class="range-scale" aria-hidden="true"><span>00:00</span><span>45:00</span><span>90:00</span></div></div>
       <p id="pitch-evidence" class="evidence-strip muted">No active evidence window.</p>
-      <p class="muted pitch-help">Drag to rotate · scroll to zoom · right-drag to pan. Highlight coordinates are derived from the active evidence window's source events.</p>
+      <p class="muted pitch-help">Click a player to identify · click empty space or Close to dismiss · drag to rotate · scroll to zoom · right-drag to pan. Identification follows the shared sample cursor, not the animation between samples. Highlight coordinates are derived from the active evidence window's source events.</p>
     </div>
   </section>
   <p id="feedback" role="status"></p>
 </main>
 <footer><div><strong>Synthetic / Simulated Match · Not a prediction</strong><span>Offline deterministic templates · Seed 20261024 · No real match data</span></div><p>Local HTML / CSS / JavaScript + vendored Three.js · Python-generated events<br>Azure / Microsoft Foundry: optional / not used · No LLM or cloud services</p></footer>
 <noscript>This local demo requires JavaScript to replay the synthetic events.</noscript>
-<script src="data/match.js"></script><script src="data/ball-flights.js"></script><script src="engine.js"></script><script src="pitch-motion.js"></script><script src="app.js"></script>
+<script src="data/match.js"></script><script src="data/ball-flights.js"></script><script src="data/player-modes.js"></script><script src="engine.js"></script><script src="pitch-motion.js"></script><script src="pitch-identification.js"></script><script src="app.js"></script>
 <script type="module" src="pitch.js" onerror="window.pitchModuleFailed?.()"></script>
 </body>
 </html>

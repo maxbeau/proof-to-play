@@ -247,6 +247,26 @@ th:last-child, td:last-child { background: var(--violet-tint); color: var(--viol
 .pitch-transport .clock { font-size: var(--base); }
 .evidence-strip { border-left: 3px solid var(--accent); background: var(--accent-tint); padding: var(--s3) var(--s4); margin: var(--s4) 0; font-size: var(--sm); }
 .pitch-help { font-size: var(--sm); margin-bottom: 0; }
+.pitch-mode-legend { margin-bottom: var(--s4); font-size: var(--sm); }
+.pitch-mode-legend > p { margin-bottom: var(--s2); }
+.pitch-mode-legend dl { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin: 0; }
+.pitch-mode-legend dl > div { flex: 1 1 150px; }
+.pitch-mode-legend dt { color: var(--accent); font-weight: 650; }
+.pitch-mode-legend dd { color: var(--muted); margin: 0; }
+.pitch-viewport { position: relative; }
+.pitch-identification { position: absolute; top: var(--s3); right: var(--s3); width: 330px; max-width: calc(100% - 1.5rem); max-height: calc(100% - 1.5rem); overflow-y: auto; overscroll-behavior: contain; padding: var(--s4); border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface); box-shadow: var(--shadow-stage); font-size: var(--sm); }
+.pitch-identification .panel-heading { gap: var(--s2); margin-bottom: var(--s4); }
+.pitch-identification h3 { font-size: var(--base); }
+.pitch-identification h4 { margin: var(--s4) 0 var(--s2); font-size: var(--sm); }
+.identification-player { color: var(--accent); font-size: var(--base); font-weight: 650; margin-bottom: var(--s1); }
+.identification-sample { color: var(--muted); font-family: var(--mono); }
+.identification-facts, .identification-weights { margin: var(--s3) 0; }
+.identification-facts > div { display: flex; justify-content: space-between; gap: var(--s3); padding: var(--s1) 0; border-bottom: 1px solid var(--line); }
+.identification-facts dt, .identification-weights dt { color: var(--muted); }
+.identification-facts dd { margin: 0; font-family: var(--mono); }
+.identification-weights > div { margin-bottom: var(--s2); }
+.identification-weights dd { margin: 0; }
+.identification-unavailable { color: var(--amber); }
 #feedback:empty { display: none; }
 footer { display: flex; justify-content: space-between; gap: var(--s6); padding-top: var(--s6); padding-bottom: var(--s8); border-top: 1px solid var(--line); color: var(--quiet); font-size: var(--xs); }
 footer strong { display: block; color: var(--muted); margin-bottom: var(--s2); font-size: var(--sm); }
@@ -263,6 +283,7 @@ noscript { display: block; padding: var(--s6); color: var(--amber); }
   .scenario-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
 }
 @media (max-width: 760px) {
+  .pitch-identification { position: static; width: 100%; max-width: none; max-height: none; margin-top: var(--s3); }
   .studio-header { align-items: stretch; flex-direction: column; gap: var(--s6); padding-top: var(--s8); padding-bottom: var(--s6); }
   .header-status { min-width: 0; }
   .session-meta { justify-content: flex-start; gap: var(--s8); }

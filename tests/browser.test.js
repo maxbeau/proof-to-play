@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-global.window=global;require('../data/match.js');require('../data/ball-flights.js');require('../engine.js');require('../pitch-motion.js');
+global.window=global;require('../data/match.js');require('../data/ball-flights.js');require('../data/player-modes.js');require('../engine.js');require('../pitch-motion.js');require('../pitch-identification.js');
 const M=global.MATCH,E=global.MatchEngine;let count=0;
 function test(name,fn){fn();count++;console.log('PASS '+name);}
 test('browser metrics equal Python output in all evidence windows',()=>{assert.deepEqual(E.metrics(M.events,0,5400,M.teams),M.metrics);M.insights.forEach(c=>{assert(E.validate(c,M.events,M.teams));assert.deepEqual(E.metrics(M.events,c.window_start,c.window_end,M.teams),c.metric_value);});});
@@ -9,15 +9,17 @@ test('bad ID, number, named entity, extra text and future claim blocked',()=>{fo
 test('publication requires valid approval and respects rewind',()=>{let q=Object.fromEntries([...M.insights,M.broken_claim].map(c=>[c.id,'Draft']));let c=M.insights[0];assert.equal(E.broadcast(M.insights,q,M.events,M.teams,5400).length,0);assert(!E.decide(q,M.broken_claim,'Approved',M.events,M.teams,5400));assert(E.decide(q,c,'Approved',M.events,M.teams,5400));assert.equal(E.broadcast(M.insights,q,M.events,M.teams,5400).length,1);assert.equal(E.broadcast(M.insights,q,M.events,M.teams,5).length,0);assert(E.decide(q,M.insights[1],'Rejected',M.events,M.teams,5400));assert(!E.decide(q,M.insights[1],'Approved',M.events,M.teams,5400));});
 test('frozen scenario is deterministic, isolated and identity at zero',()=>{let s=E.freeze(M.events,1800,M.teams),before=JSON.stringify(s),a=E.scenario(s,0,0);assert.deepEqual(a.baseline,a.scenario);assert.deepEqual(E.scenario(s,20,20),E.scenario(s,20,20));let b=E.scenario(s,20,20);assert(b.scenario.pressure_actions>b.baseline.pressure_actions);assert(b.scenario.recovery_seconds>b.baseline.recovery_seconds);assert.equal(JSON.stringify(s),before);assert.throws(()=>E.freeze(M.events,5,M.teams));assert.throws(()=>E.scenario(s,100,0));});
 // Minimal DOM harness exercises actual app handlers without installing packages.
-class Element{constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.value='';this.textContent='';this.hidden=false;this.attributes={};}append(...n){this.children.push(...n);}replaceChildren(...n){this.children=n;}setAttribute(k,v){this.attributes[k]=v;}}
+class Element{constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.value='';this.textContent='';this.hidden=false;this.attributes={};this.listeners={};}append(...n){this.children.push(...n);}replaceChildren(...n){this.children=n;}setAttribute(k,v){this.attributes[k]=v;}addEventListener(type,fn){(this.listeners[type]??=[]).push(fn);}dispatch(type,event={}){for(const fn of this.listeners[type]||[])fn(event);}}
 const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8'),els={};for(const match of html.matchAll(/id="([^"]+)"/g))els[match[1]]=new Element();els.density.value='Fan';els.language.value='en';els.press.value='0';els.flank.value='0';
 const nav=['live','evidence','scenario','publish','pitch'].map(name=>{let e=new Element('button');e.dataset.view=name;return e;});
 let now=1000,tick=null,intervalMs=null;
 Object.defineProperty(global,'performance',{value:{now:()=>now},configurable:true});
 global.setInterval=(fn,ms)=>{tick=fn;intervalMs=ms;return 1;};global.clearInterval=()=>{tick=null;};
 const uiMotion=PitchMotion.createMotion();
-let pitchCursor=null,pitchResizes=0;global.PitchView={update:(seconds,event,claim,events,playback)=>{pitchCursor={seconds,event,claim,playback};uiMotion.update(seconds,event.positions,events.find(e=>e.time===seconds+5)?.positions,playback.playing,playback.started,now,playback.snap,BALL_FLIGHTS.plans[event.id]);},resize:()=>{pitchResizes++;}};
+let uiIdentification;
+let pitchCursor=null,pitchResizes=0;global.PitchView={update:(seconds,event,claim,events,playback)=>{pitchCursor={seconds,event,claim,playback};uiIdentification?.update(seconds);uiMotion.update(seconds,event.positions,events.find(e=>e.time===seconds+5)?.positions,playback.playing,playback.started,now,playback.snap,BALL_FLIGHTS.plans[event.id]);},resize:()=>{pitchResizes++;}};
 global.document={getElementById:id=>els[id],createElement:tag=>new Element(tag),querySelectorAll:q=>q==='[data-view]'?nav:['live','evidence','scenario','publish','pitch'].map(id=>{els[id].id=id;return els[id];})};
+uiIdentification=PitchIdentification.createPanel(M,PLAYER_MODES,{panel:els['pitch-identification'],content:els['pitch-identification-content'],close:els['pitch-identification-close']});
 vm.runInThisContext(fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8'));
 const text=e=>e.textContent+' '+e.children.map(text).join(' ');
 test('actual UI initializes, jumps, freezes, adjusts and switches views',()=>{assert(text(els.clock).includes('00:05'));els.jumps.children[0].onclick();assert(text(els.clock).includes('30:00'));els.freeze.onclick();els.press.value='20';els.press.oninput();assert(text(els.comparison).includes('Directional scenario'));els.timeline.value='3300';els.timeline.oninput();assert(text(els['freeze-status']).includes('30:00'));nav[2].onclick();assert.equal(els.scenario.hidden,false);assert.equal(els.live.hidden,true);});
@@ -84,4 +86,5 @@ test('actual ball flight legs run at 12–25 m/s, intercept, hold and join witho
  m.update(0,[0,0],[20,0],true,0,0,false,short);
  assert.deepEqual(m.at(25),[10,0]);assert.deepEqual(m.at(50),[20,0]);assert.deepEqual(m.at(125),[20,0]);
 });
+require('./player-identification.test.js')({test,M,Element,els,nav,text,panel:uiIdentification,advance:()=>{now+=250;tick();}});
 console.log(count+' browser-engine/UI tests passed; 0 failed (DOM harness, not a real browser).');

@@ -8,6 +8,13 @@ const canvas = document.getElementById('pitch-canvas');
 const pitchClock = document.getElementById('pitch-clock');
 const evidenceLabel = document.getElementById('pitch-evidence');
 const pitchTimeline = document.getElementById('pitch-timeline');
+const identification = window.PitchIdentification.createPanel(M, window.PLAYER_MODES, {
+  panel: document.getElementById('pitch-identification'),
+  content: document.getElementById('pitch-identification-content'),
+  close: document.getElementById('pitch-identification-close')
+});
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
 const fallback = message => {
   const box = document.getElementById('pitch-fallback');
   if (box) { box.hidden = false; box.textContent = message; }
@@ -84,6 +91,7 @@ function addPlayers() {
     face.position.y = 3.25;
     group.add(body, face);
     group.userData.player = player;
+    group.userData.playerIndex = index;
     scene.add(group);
     players.push(group);
   });
@@ -153,6 +161,7 @@ function animatePositions(now) {
 }
 
 function update(seconds, event, claim, events, playback = {}) {
+  identification.update(seconds);
   if (!event?.positions) return;
   const next = events.find(row => row.time === seconds + 5);
   const now = performance.now();
@@ -160,6 +169,18 @@ function update(seconds, event, claim, events, playback = {}) {
   pitchTimeline.value = seconds;
   pitchClock.textContent = `${clock(seconds)} / 90:00 · Sample ${Math.floor(seconds / 5)}`;
   showHighlight(claim, events);
+}
+
+function pickPlayer(clientX, clientY) {
+  const box = canvas.getBoundingClientRect();
+  if (!box.width || !box.height) return null;
+  pointer.set((clientX - box.left) / box.width * 2 - 1, -(clientY - box.top) / box.height * 2 + 1);
+  // Include current OrbitControls / Reset view transforms before intersecting.
+  scene.updateMatrixWorld(true);
+  camera.updateMatrixWorld();
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(players, true)[0];
+  return window.PitchIdentification.tokenIndex(hit?.object);
 }
 
 function resetView() {
@@ -189,6 +210,7 @@ try {
   scene.add(new THREE.HemisphereLight(0xe8fff3, 0x163725, 2.4));
   const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(20, 90, 30); scene.add(sun);
   addPitch(); addPlayers(); addHighlight(); resetView(); resize();
+  window.PitchIdentification.attachPicking(canvas, pickPlayer, index => identification.select(index));
   window.addEventListener('resize', resize);
   document.getElementById('pitch-reset')?.addEventListener('click', resetView);
   const render = now => { animatePositions(now); controls.update(); renderer.render(scene, camera); requestAnimationFrame(render); };
