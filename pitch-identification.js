@@ -61,7 +61,7 @@
     return 'Stored weight; unused in this model';
   }
 
-  function createPanel(match, data, elements) {
+  function createPanel(match, data, elements, values = root.PLAYER_VALUES) {
     const selection = createSelection(match, data);
     const { panel, content, close } = elements;
     const node = (tag, text, className) => {
@@ -85,8 +85,30 @@
       for (const [label, value] of [['Role', state.role], ['Mode', state.mode], ['Simulated speed', state.speed.toFixed(2) + ' m/s']]) {
         const row = node('div', ''); row.append(node('dt', label), node('dd', value)); facts.append(row);
       }
-      content.append(facts, node('p', MODES[state.mode], 'muted'),
-        node('p', 'Speed = position displacement / elapsed match seconds, ' + clock(state.fromTime) + '–' + clock(state.seconds) + '. Sample estimate, not instantaneous or tracked speed.', 'muted'),
+      content.append(facts, node('p', MODES[state.mode], 'muted'));
+      const valuation = root.PitchValuation?.current(match, data, values, state.index, state.seconds);
+      content.append(node('h4', 'Interpretable value'),
+        node('p', "rule-computed schematic scores over synthetic positions — NOT learned Q-values, NOT the paper's trained model, NOT an equilibrium computation", 'identification-score-label'));
+      if (!valuation) {
+        content.append(node('p', 'Scores unavailable at ' + clock(state.seconds) + ': missing or mismatched valuation sidecar. No previous scores are shown.', 'identification-unavailable'));
+      } else {
+        content.append(node('p', valuation.value.toFixed(8) + ' / 1', 'identification-value'),
+          node('p', 'Active weight set: ' + valuation.mode + ' · ' + valuation.why, 'identification-weight-set'),
+          node('p', 'Each contribution = score × weight. Weights sum to 1; these are fixed display rules, separate from steering weights.', 'muted'));
+        const scores = node('dl', '', 'identification-scores');
+        root.PitchValuation.FEATURES.forEach((key, i) => {
+          const emphasized = key === valuation.emphasis;
+          const row = node('div', '', 'identification-score' + (emphasized ? ' is-emphasized' : ''));
+          row.dataset.feature = key;
+          row.append(node('dt', root.PitchValuation.NAMES[i] + (emphasized ? ' · MODE FOCUS' : '')),
+            node('dd', valuation.scores[i].toFixed(6) + ' × ' + valuation.weights[i].toFixed(2) + ' = ' + valuation.contributions[i].toFixed(8)));
+          scores.append(row);
+        });
+        content.append(scores,
+          node('p', 'Total = ' + valuation.contributions.map(v => v.toFixed(8)).join(' + ') + ' = ' + valuation.value.toFixed(8), 'identification-sum'),
+          node('p', 'Marking target proxy: ' + valuation.target + ' (nearest opponent at this sample; not the generator’s assigned target). Pass and shot scores are hypothetical from this position, regardless of possession. Ball accessibility measures proximity, not interception probability.', 'muted'));
+      }
+      content.append(node('p', 'Speed = position displacement / elapsed match seconds, ' + clock(state.fromTime) + '–' + clock(state.seconds) + '. Sample estimate, not instantaneous or tracked speed.', 'muted'),
         node('h4', 'Steering weights'));
       const weights = node('dl', '', 'identification-weights');
       for (const name of WEIGHTS) {

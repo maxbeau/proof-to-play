@@ -267,6 +267,16 @@ th:last-child, td:last-child { background: var(--violet-tint); color: var(--viol
 .identification-weights > div { margin-bottom: var(--s2); }
 .identification-weights dd { margin: 0; }
 .identification-unavailable { color: var(--amber); }
+.identification-score-label { color: var(--amber); font-size: var(--xs); line-height: 1.5; border-left: 2px solid var(--amber); padding-left: var(--s2); }
+.identification-value { font-family: var(--mono); font-size: var(--lg); color: var(--accent); font-weight: 650; margin: var(--s2) 0; }
+.identification-weight-set { line-height: 1.5; }
+.identification-scores { margin: var(--s3) 0; }
+.identification-score { padding: var(--s2); margin-bottom: var(--s1); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.identification-score dt { color: var(--muted); }
+.identification-score dd { margin: var(--s1) 0 0; font-family: var(--mono); font-size: var(--xs); overflow-wrap: anywhere; }
+.identification-score.is-emphasized { background: var(--accent-tint); border-color: var(--accent); }
+.identification-score.is-emphasized dt { color: var(--accent); font-weight: 650; }
+.identification-sum { font-family: var(--mono); font-size: var(--xs); overflow-wrap: anywhere; }
 #feedback:empty { display: none; }
 footer { display: flex; justify-content: space-between; gap: var(--s6); padding-top: var(--s6); padding-bottom: var(--s8); border-top: 1px solid var(--line); color: var(--quiet); font-size: var(--xs); }
 footer strong { display: block; color: var(--muted); margin-bottom: var(--s2); font-size: var(--sm); }

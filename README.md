@@ -99,6 +99,56 @@ The panel labels unused and mode-conditional weights explicitly. These are seede
 
 This separate file keeps mode diagnostics out of match.json/events.jsonl and all evidence objects, preserving the non-position hash checks. Both sidecar formats regenerate byte-identically for the default seed. Full-file SHA-256 tests also pin all five pre-existing generated artifacts to **e172f6a**, including positions and ball flights: this feature changes display/export only, not the simulation, steering, events, metrics or evidence gate.
 
+### Interpretable schematic valuation (Pitch panel only)
+
+**rule-computed schematic scores over synthetic positions — NOT learned Q-values, NOT the paper's trained model, NOT an equilibrium computation**
+
+The identification panel now shows all five EDMS-inspired feature names, a mode-specific weighted sum, every weight and every contribution. These are our own transparent geometric rules, **not the paper's feature implementations**, fitted rewards, calibrated probabilities, expected goals, predicted outcomes, or a ranking of real player quality. Scores use the stored five-second sample, never the interpolated pose. A score is an opportunity/proximity proxy, not evidence that an action happened.
+
+`pitch-valuation.js` is the single formula implementation used by generation and validation. Let `C(z) = max(0, min(1, z))`, `d(a,b)` be Euclidean distance in metres, `p` the selected player, `b` the stored ball, `O` the opposing team and `T` the other ten teammates. Attack directions stay fixed as in the existing generator: Aster Quills toward `(+52.5,0)`, Mica Lanterns toward `(-52.5,0)`.
+
+| Feature | Precise formula (before rounding) | Interpretation / limits |
+| --- | --- | --- |
+| Space score | `C(min(o in O) d(p,o) / 10)` | Room to the nearest opponent; saturates at 10 m. |
+| Pass score | `mean(best 3 of L(p,t), t in T)` where `L(p,t) = C(1-d(p,t)/45) × C(min(o in O) d(o,segment[p,t])/4) × C(min(o in O) d(t,o)/10)` | Short, clear lanes with receiver space; hypothetical if this player had the ball, regardless of possession. A blocked lane is zero; a pass of 45 m or more is zero. |
+| Shot score | `C(1-d(p,g)/35)^2 × C(s × (g.x-p.x)/d(p,g))`, with angle factor 1 at `p=g` | `g` is the attacking goal centre, `s=+1/-1` the attack direction. Exactly zero at/beyond 35 m or behind the goal; angle discounts wide locations. Same rule for all roles, including GK. Hypothetical, not xG. |
+| Marking pressure | `C(1-d(p,o*)/12) × (0.5 + 0.5 × C(1-d(o*,b)/25))` | `o*` is the nearest opponent at this sample, ties by roster order. Combines proximity with that opponent's ball proximity; zero at/beyond 12 m. |
+| Ball accessibility | `C(1-d(p,b)/30)` | Distance-only reach proxy, zero at/beyond 30 m; no speed, interception time, obstacles or possession inference. |
+
+For pass clearance, the closed-segment projection is `q = p + C(((o-p)·(t-p))/||t-p||²) × (t-p)` and `d(o,segment[p,t]) = d(o,q)`; a zero-length segment uses `q=p`. Including both endpoints penalizes pressure on the passer and receiver. The best three lanes are averaged (not the sum of all ten); sorting is deterministic. All thresholds are explicit schematic design choices, not fitted football parameters.
+
+**Marking limitation:** the stored mode sidecar does not export the generator's persistent assigned opponent. We therefore do **not** claim to measure pressure on that assignment. The panel names the current nearest-opponent **target proxy**, used for all players, and states that it is not the assigned target. A marker can honestly have zero pressure when no opponent is within 12 m (AQ-02 at sample 360 does). The marker weight prioritizes this feature; it does not force a high score.
+
+Mode weights are fixed percentages summing to 100, separate from seeded steering weights:
+
+| Active mode set | Space | Pass | Shot | Marking | Ball | Emphasis and reason |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| holder | 15% | 45% | 20% | 5% | 15% | Pass: options from the default role route; holder is not a ball-carrier label. |
+| presser | 10% | 10% | 5% | 25% | 50% | Ball: reach for the mode assigned to pursue the previous sampled ball. |
+| runner | 40% | 20% | 25% | 5% | 10% | Space: room for a role-shaped attacking run. |
+| supporter | 40% | 30% | 10% | 5% | 15% | Space: room for midfield support. |
+| marker | 10% | 10% | 5% | 60% | 15% | Marking: opponent proximity and ball threat. |
+
+Scores are clamped and rounded once to six decimals (`Math.round(C(raw) × 10^6) / 10^6`). Each contribution is `score × weight`, computed as integer score millionths times integer percentage divided by `10^8`; the interpretable value is the sum of those integer contribution units divided by `10^8`. Scores display six decimals, weights two, and contributions/total eight so the visible sum reconciles exactly. Mode focus has both a text badge and a highlighted border; all other features stay visible. Comparisons across different weight sets are descriptive, not a universal player ranking.
+
+Generate **only the new sidecars** from existing artifacts:
+
+    node pitch-valuation.js
+
+This reads `data/match.json` and `data/player-modes.json` and writes only `data/player-values.json` plus the equivalent local classic-script `data/player-values.js`. No npm, dependencies, assets, network, backend or application build step is introduced; Node is the existing test runtime and is needed only for offline score regeneration. The original pipeline, events, modes, motion and evidence logic are unchanged. If those inputs are intentionally regenerated later, run this separate command afterward.
+
+Each sidecar contains a formula version, exact disclosure, seed, roster order, feature order, weight sets and 1,080 samples × 22 rows. A player row is `[space, pass, shot, marking, ball, nearestOpponentRosterIndex]`; each sample also records its time, modes and a 32-bit FNV-1a signature of `JSON.stringify(event.positions)`. The signature detects stale same-seed geometry; it is not a security hash. No wall-clock data or random draws enter generation. The UI checks metadata, time, mode, geometry signature, numeric range/precision and target membership, and clears stale values if valuation data is absent or invalid while retaining valid identification details.
+
+Sample **360 / 30:00** (one-based; event E0360) values, in feature order **space / pass / shot / marking / ball**:
+
+| Player / mode | Scores | Contributions | Total | Target proxy |
+| --- | --- | --- | ---: | --- |
+| AQ-07 / presser | 0.821340 / 0.638793 / 0.000000 / 0.194410 / 0.576667 | 0.08213400 + 0.06387930 + 0.00000000 + 0.04860250 + 0.28833350 | 0.48294930 | ML-10 |
+| AQ-03 / marker | 0.832586 / 0.659073 / 0.000000 / 0.306178 / 0.722471 | 0.08325860 + 0.06590730 + 0.00000000 + 0.18370680 + 0.10837065 | 0.44124335 | ML-07 |
+| ML-10 / runner | 0.821340 / 0.482263 / 0.031610 / 0.235400 / 0.360165 | 0.32853600 + 0.09645260 + 0.00790250 + 0.01177000 + 0.03601650 | 0.48067760 | AQ-07 |
+
+At this sample AQ-03's marking pressure (0.306178) exceeds distant AQ-10's (0); the AQ goalkeeper and all four deep AQ defenders have shot score 0. ML-10's shot score is small but nonzero because it is in range. These checks exercise geometry without assuming a mode label implies success.
+
 ### Synthetic/schematic ball flight
 
 All positions remain **SYNTHETIC / SIMULATED — generated schematic positions; not real tracking data or measured player locations**. Events, actors, timestamps, outcomes, metrics, evidence objects and the evidence gate stay unchanged. The ball is exactly on its event actor at every stored sample. There is one player integration pass, with no independent frozen ball guide or post-hoc ball-step cap.
@@ -197,11 +247,57 @@ Actual runtime technologies: Python standard library, HTML, CSS and JavaScript. 
 
 Azure and Microsoft Foundry are **optional future ideas / not used**. No adapters, accounts, resources or cloud deployments have been created. No LLM API, paid service, remote fonts, analytics, external assets or data feeds are used. There is no backend, GitHub repository creation, push or hackathon submission in this deliverable.
 
+## Related work — what this demo borrows, and what it deliberately does not
+
+This demo is rule-computed and template-narrated; it does not train or run
+a learned valuation model. The closest research reference for its design is:
+
+- Kenjiro Ide, Taiga Someya, Kohei Kawaguchi, Keisuke Fujii,
+  "Strategic Multi-Agent Learning for Interpretable Action Valuation of
+  All Players in Football", arXiv:2610.05961,
+  https://arxiv.org/abs/2610.05961
+
+That paper values on-ball, off-ball and defensive players together instead
+of only the ball carrier, using tactically interpretable state variables
+(Expandable Decision-Making States, EDMS: space score, pass score, shot
+score, marking pressure, ball accessibility) and decomposing an action
+value into a successor-feature basis times a linear reward-weight vector,
+so a value can be read as contributions from interpretable features
+rather than one opaque number. Its cautionary finding is also relevant
+here: an independent per-player RL baseline ranked forward movement
+highest in 99.21% of evaluated off-ball states, while the proposed
+formulation's most frequent direction accounted for only 17.63% — a
+reminder that a learned per-player value is not automatically trustworthy.
+
+What this demo takes from that line of work is the *framing*, not the
+trained model: every player (holder, presser, runner, supporter, marker)
+gets an interpretable state, and every claim is shown with its window,
+source events, formula version and fact-check status, so a producer can
+see *why* something matters instead of being handed a single score.
+What it does not take is the learning itself: there is no tracking-data
+training, no equilibrium computation (the paper itself presents Markov
+perfect equilibrium as a motivating concept, not a computed and verified
+equilibrium), and no learned Q-values. The scores and weights shown here
+are deterministic, rule-computed schematic proxies over synthetic
+positions, labelled as such. The Pitch identification panel now uses
+EDMS-inspired feature names and an explicit weighted contribution
+breakdown; its own geometric formulas and mode weights are documented
+above. It does not reproduce the paper's learned feature/value model.
+
+For contrast: VAEP-style methods value on-ball actions by changes in
+scoring/conceding probability, and Expected Possession Value / Expected
+Threat value possession and pitch zones; neither by itself values all
+22 players' off-ball and defensive actions in an interpretable,
+agent-by-agent way, which is exactly the gap the Ide et al. framing
+addresses and this demo's identification panel gestures toward.
+
 ## Tests and limitations
 
 The suite covers seed byte reproducibility, alternate seed behavior, stored-event recomputation, artifact parity, magnitude bounds, three turning points, provenance in every template, malformed claims, score snapshots, local assets, Python/JavaScript agreement, frozen scenario stability, and approval/rejection/rewind behavior. A grep extraction verifies that every generated entity field belongs to the closed fictional allowlist. This is a positive entity-inventory check, not a claim to maintain an exhaustive worldwide real-person-name blacklist; no external name dataset is used.
 
-Verification: **python3 pipeline.py succeeded. python3 tests/run.py reported 51 passed, 0 failed, 0 skipped**: 32 Python checks and 19 JavaScript engine/UI checks. All 41 existing checks remain; identification adds four Python and six JavaScript checks. tests/run.py derives totals from discovery and records them in tests/unified_movement_after.json. The earlier movement-repair results below remain unchanged by this display-only feature.
+Panel valuation verification (2026-10-27): **python3 tests/run.py reported 63 passed, 0 failed, 0 skipped**: 36 Python checks and 27 JavaScript engine/UI checks. All previous 51 expectations remain unchanged; valuation adds four Python and eight JavaScript checks. New tests cover all five score ranges and decomposition for every sample/player across seeds 20261024, 20261025 and 42, byte-identical regeneration in separate processes, geometric boundary cases, sample-360 panel values, all five mode emphases, stale/missing data, exact disclosure text and local asset wiring. Two `node pitch-valuation.js` CLI regenerations also produced byte-identical new sidecars. All seven pre-existing generated artifacts remain byte-identical to HEAD 0c15bf3. See `tests/panel-valuation-verification.md` for the complete files, formulas, sample values and hashes.
+
+Earlier identification verification: **python3 pipeline.py succeeded. python3 tests/run.py reported 51 passed, 0 failed, 0 skipped**: 32 Python checks and 19 JavaScript engine/UI checks. All 41 pre-identification checks remained; identification added four Python and six JavaScript checks. tests/run.py derives totals from discovery and records them in tests/unified_movement_after.json. The earlier movement-repair results below remain unchanged by these display-only features.
 
 | Previously failing requirement | Before this repair | Verified after repair |
 | --- | --- | --- |

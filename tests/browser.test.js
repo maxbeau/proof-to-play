@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-global.window=global;require('../data/match.js');require('../data/ball-flights.js');require('../data/player-modes.js');require('../engine.js');require('../pitch-motion.js');require('../pitch-identification.js');
+global.window=global;require('../data/match.js');require('../data/ball-flights.js');require('../data/player-modes.js');require('../data/player-values.js');require('../engine.js');require('../pitch-motion.js');require('../pitch-valuation.js');require('../pitch-identification.js');
 const M=global.MATCH,E=global.MatchEngine;let count=0;
 function test(name,fn){fn();count++;console.log('PASS '+name);}
 test('browser metrics equal Python output in all evidence windows',()=>{assert.deepEqual(E.metrics(M.events,0,5400,M.teams),M.metrics);M.insights.forEach(c=>{assert(E.validate(c,M.events,M.teams));assert.deepEqual(E.metrics(M.events,c.window_start,c.window_end,M.teams),c.metric_value);});});
@@ -87,4 +87,5 @@ test('actual ball flight legs run at 12–25 m/s, intercept, hold and join witho
  assert.deepEqual(m.at(25),[10,0]);assert.deepEqual(m.at(50),[20,0]);assert.deepEqual(m.at(125),[20,0]);
 });
 require('./player-identification.test.js')({test,M,Element,els,nav,text,panel:uiIdentification,advance:()=>{now+=250;tick();}});
+require('./player-valuation.test.js')({test,M,Element,text});
 console.log(count+' browser-engine/UI tests passed; 0 failed (DOM harness, not a real browser).');
